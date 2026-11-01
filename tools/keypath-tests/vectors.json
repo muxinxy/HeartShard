@@ -1,0 +1,69 @@
+{
+  "comment": "HeartShard keypath shared vectors. Contract: every platform implementation (Rust core, ArkTS shell, any JS/WASM layer) MUST produce identical output for these inputs. sanitize.valid=false means the input must be rejected. Generated: M0 (2026-11-01).",
+  "sanitize": [
+    { "input": "a3f1c2d4e5f60718293a4b5c6d7e8f90", "valid": true },
+    { "input": "00000_00.shard", "valid": true },
+    { "input": "manifest.bin", "valid": true },
+    { "input": "device01ab", "valid": true },
+    { "input": "0", "valid": true },
+    { "input": "a-b_c.d", "valid": true },
+    { "input": "", "valid": false },
+    { "input": "A", "valid": false },
+    { "input": "a b", "valid": false },
+    { "input": "a#b", "valid": false },
+    { "input": "a*b", "valid": false },
+    { "input": "a:b", "valid": false },
+    { "input": "a?b", "valid": false },
+    { "input": "a'b", "valid": false },
+    { "input": "a\"b", "valid": false },
+    { "input": "a<b", "valid": false },
+    { "input": "a>b", "valid": false },
+    { "input": "a|b", "valid": false },
+    { "input": "a[b", "valid": false },
+    { "input": "a]b", "valid": false },
+    { "input": "a/b", "valid": false },
+    { "input": "a\\b", "valid": false },
+    { "input": "照片", "valid": false },
+    { "input": "\u00e9", "valid": false },
+    { "input": ".hidden", "valid": false },
+    { "input": "trailing.", "valid": false },
+    { "input": "..", "valid": false },
+    { "input": "con", "valid": false },
+    { "input": "aux.png", "valid": false },
+    { "input": "console", "valid": false },
+    { "input": "nul.txt", "valid": false },
+    { "input": "com1", "valid": false },
+    { "input": "lpt9.log", "valid": false },
+    { "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": false }
+  ],
+  "shard_key": [
+    {
+      "blob_hash": "a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "chunk_index": 0,
+      "shard_index": 0,
+      "expected": "blobs/a3/f1/a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90/00000_00.shard"
+    },
+    {
+      "blob_hash": "a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "chunk_index": 42,
+      "shard_index": 3,
+      "expected": "blobs/a3/f1/a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90/00042_03.shard"
+    },
+    {
+      "blob_hash": "a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "chunk_index": 123456,
+      "shard_index": 255,
+      "expected": "blobs/a3/f1/a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90/123456_255.shard"
+    }
+  ],
+  "manifest_key": [
+    {
+      "blob_hash": "a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "expected": "manifests/a3/f1/a3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90/manifest.bin"
+    }
+  ],
+  "index_key": [
+    { "device_id": "device01ab", "lamport_clock": 42, "expected": "index/device01ab/42.idx" },
+    { "device_id": "device01ab", "lamport_clock": 0, "expected": "index/device01ab/0.idx" }
+  ]
+}

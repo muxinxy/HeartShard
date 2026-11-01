@@ -1,0 +1,46 @@
+{
+  "generator": "VectorGen.java (JCE AES/GCM/NoPadding, tag 96bit, layout iv||ct||tag)",
+  "base62_alphabet": "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  "vectors": [
+    {
+      "id": "V1",
+      "desc": "64B plaintext, AES-256 key, fixed iv, full ciphertext",
+      "key_len": 32, "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "iv_hex": "a0a1a2a3a4a5a6a7a8a9aaab",
+      "plaintext_len": 64, "plaintext_hex": "48656172745368617264204d3020766563746f722030313a204d697846696c65204145532d47434d20616c69676e6d656e742e48656172745368617264204d30",
+      "plaintext_sha256_hex": "a926106958dcb85deaa065d663055bef29ed24d72140c8577d7c84f0c45982df", "plaintext_sha256_base62": "E6QeJU6asdY7TrVzlku1qZedQlhJLSZw256Z0GwSch1",
+      "ciphertext_hex": "a0a1a2a3a4a5a6a7a8a9aaabae7d1d5f31986ade1001a79e375ab6bb13d83662b2877356bc434ffe39c21964f23702ac826510707ffd68a16e14ee9c296f680007b1680a12366a2cc050c880cf1a90863a190fd10870665f", "ciphertext_sha256_hex": "4b36a0f7c1373eb343e738ae7809c62819e14b61130ede2b89805241c8bd6846"
+    },
+    {
+      "id": "V2",
+      "desc": "1.5MiB deterministic PRNG plaintext, chunk_size=1MiB, 2 chunks; index JSON -> gzip -> AES; boundary+hash only (full bytes via prng seed)",
+      "key_len": 32, "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "prng_seed": "heartshard-m0-prng-v2", "plaintext_len": 1572864,
+      "chunk_size": 1048576,
+      "chunk0": {"iv_hex": "a0a1a2a3a4a5a6a7a8a9aaab", "pt_len": 1048576, "pt_sha256_hex": "2708c069c04c3bd03d04efa2c970123bd3646ec55164ddd093c7447ed57525ff", "pt_sha256_base62": "9fSRtAC4aYRRWJyeWtBFf7eGdIeWTID6zx42WklSTDh", "ct_len": 1048600, "ct_sha256_hex": "a6fc8a206c268812a6c8df1ef051b7a53d8802992cf3e9ff68129c9a2ff7c846", "ct_first32_hex": "a0a1a2a3a4a5a6a7a8a9aaab2fde7782ed37cce8d9b946abe02d27f507976784", "ct_last32_hex": "282f747d0941a1faf1b6082e28dc63be0f0cdd351a3c7356f80c1d8e72dc9b12"},
+      "chunk1": {"iv_hex": "b0b1b2b3b4b5b6b7b8b9babb", "pt_len": 524288, "pt_sha256_hex": "04e9c1074a48e7082ebca1864ae73c0976da1d3228548fa26549643701976736", "pt_sha256_base62": "1aeruxwZ0lZvaI5clwjpBX1QGV83pgBknD0PQt0zj0y", "ct_len": 524312, "ct_sha256_hex": "ab615166d180140a59fa5c76bef1d3971a46476aae04fdedb5ae07e11ee79669", "ct_first32_hex": "b0b1b2b3b4b5b6b7b8b9babb8974d47e67b6646efebf69ae1c044c52bdcf2358", "ct_last32_hex": "2318d5dad9f858bfc41a91497cdcc009c20e3397330b803e0f890399ac8b695e"},
+      "index_json": "{\"chunk_size\":1048576,\"file_size\":1572864,\"version\":0,\"file_list\":[\"https://example.com/blob/c0#9fSRtAC4aYRRWJyeWtBFf7eGdIeWTID6zx42WklSTDh\",\"https://example.com/blob/c1#1aeruxwZ0lZvaI5clwjpBX1QGV83pgBknD0PQt0zj0y\"]}",
+      "index_gzip_hex": "1f8b08000000000000ff7dccb90e82401440d17f79b4440664934e2412ac148ce31263067cc83202915110e3bfdb686b7b4f725f9064f7aa3cb5f980e0a844b70dcb9421cd39fe9a6169b6a9cbf0c05b9bd71538e4eb3c6f053807c884685a4751b067d786e328a9af4acceb5849883449a3504c673adb85215d3c910a779e5ae89f03a4ebc033875ed768c9a3b59781fce7a44a2ac3dbbdeff684ef1f2c3012de158dbb5557fec61e3717b7ac3cb25c093214e409c7f707ebc04d8ad8000000",
+      "index_gzip_note": "Java GZIPOutputStream default header (MTIME=0, OS=0); other stacks may emit different but valid gzip - compare after decompression, not byte-for-byte",
+      "index_encrypted_hex": "c0c1c2c3c4c5c6c7c8c9cacb1fc32f677778965e9826806e8ba26a165833324045565bbc4e50052e25d16b3a5f84f4a10e137701591c44fa461f0de2f62aad2542a957b3b890d750024f7faa00e71f1c24ff823603fcaeb53fa7dfddde91bf9722e619e2a616b3db3224498591311770c0efe301ae415ee4009b9efd93f4d53b10db683a32766ceda04c794cd3eb08e7b24329442ea55daecfaa6ceb539e8efdf98450d5a251dad57a26caa3b24b668b34ef1ea6be7039a8c7930ff517f71980970da7df594a052a9e5f66e22b21e30ab4cde1f3202d5ba1",
+      "index_encrypted_iv_hex": "c0c1c2c3c4c5c6c7c8c9cacb",
+      "index_encrypted_sha256_hex": "af82eada8b7275133143c0bb3772daa83e163850f4fdee4ed0ef3d4b2403ffcd"
+    },
+    {
+      "id": "V3",
+      "desc": "MixShareInfo share code: JSON encrypted with key=MD5(\"123\") (16B => AES-128), base62-encoded; full output",
+      "key_len": 16, "key_hex": "202cb962ac59075b964b07152d234b70", "key_derivation": "MD5 of UTF-8 string \"123\"",
+      "iv_hex": "a0a1a2a3a4a5a6a7a8a9aaab",
+      "plaintext_utf8": "{\"f\":\"sunset-beach.jpg\",\"s\":1572864,\"h\":0,\"u\":\"https://example.com/blob/index#gudSRmA4p4cEK7NDJtRlIucQUMlu3RjvqxfOQGESSS3\",\"k\":\"03AuLtjc7TJLctqJ2Unu3mfAGcxg9lrkrCWgKbidLF\",\"r\":\"\"}",
+      "ciphertext_hex": "a0a1a2a3a4a5a6a7a8a9aaab3dcdf1dadb72452144b44ca2c4632eee451e07ba89d27da032696e6cfe2894db3b3afc74618f67a265228e60703b2ef8801ae126123b4a2342637bc775c1e36898baf76a1a9596e0aad79ed6f3bd21bf4757a16b23c4e1296aa9f0d0798b1c6de5cd11ce88f8a1a5018e81d4ae367ddc890d4b03cb982443e7f4d1cd1d7bc8a72674fecc1025dc2d7b339798a706dd914623c15a73106e14a8ef307e4fca6d4c0848fc07725f441c7cba62fee8bebba255545ebe1da9639ce8634d84d175d0",
+      "share_code": "dNn7UA2Al0Tiim6WfJ9TfxxKDoyo4K48iW9WAPTrelnap1gdW9PaV2p3YOyXfwHTrNHhV869GUgbPUpDFvXivRbYlIq5NPyoecNyPdpxM0XepGXZSomtkqtp7LAAREVD465dhs6i0lDEKRD77BgUF567OejAwqrMOM4tWEANUavUzcH0WvJtsQr1ZcknsESO8o8Exb2yQAaAlrWlEnhRRM6lK4z127fp7OQ9vLMkDykNxrzxKffyZ2jcSEM4s9pTudWPEWJ3hBhpVDSFi",
+      "ciphertext_sha256_hex": "d983888146aa67ee8e14e7107111c9d1bb95c1c7a3e006a3a4337cfa6155d4e5"
+    },
+    {
+      "id": "V4",
+      "desc": "empty plaintext, AES-256: output = iv || 12B tag only",
+      "key_len": 32, "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "iv_hex": "a0a1a2a3a4a5a6a7a8a9aaab",
+      "plaintext_len": 0, "plaintext_hex": "",
+      "ciphertext_hex": "a0a1a2a3a4a5a6a7a8a9aaab5c699625af4b93a0f8220a2a", "ciphertext_len": 24
+    }
+  ]
+}

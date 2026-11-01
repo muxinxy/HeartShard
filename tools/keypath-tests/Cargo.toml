@@ -1,0 +1,10 @@
+[package]
+name = "keypath-tests"
+description = "Cross-platform keypath consistency checker: validates shared vectors against the Rust reference implementation"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+keypath = { path = "../../core-rs/crates/keypath" }
+serde_json = "1"

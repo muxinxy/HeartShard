@@ -1,0 +1,10 @@
+# HeartShard toolchains (managed by mise, https://mise.jdx.dev)
+# Rust core (core-rs): host target x86_64-pc-windows-msvc + wasm32-unknown-unknown (see rustup)
+[tools]
+rust = "stable"      # 1.98.x, edition 2024 requires >= 1.85
+node = "24"          # Tauri 2 frontend (apps/tauri), used from M1
+pnpm = "latest"      # package manager for apps/tauri, used from M1
+
+[env]
+# fail CI/local builds on accidental debug output of secrets
+RUST_BACKTRACE = "1"

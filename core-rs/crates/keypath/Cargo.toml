@@ -1,0 +1,12 @@
+[package]
+name = "keypath"
+description = "HeartShard object key generation + filename sanitization (single source of truth for all four platform shells)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

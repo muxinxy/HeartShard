@@ -1,0 +1,10 @@
+[package]
+name = "ida"
+description = "HeartShard Reed-Solomon information dispersal: encrypt-chunk ciphertext -> n shards, recover from any m"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reed-solomon-simd = { workspace = true }
+thiserror = { workspace = true }

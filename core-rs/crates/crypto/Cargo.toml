@@ -1,0 +1,21 @@
+[package]
+name = "crypto"
+description = "HeartShard AES-256-GCM chunk encryption (MixFile-aligned bare layer + HeartShard AAD layer) and KDF (Argon2id -> MK -> HKDF)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes = { workspace = true }
+aes-gcm = { workspace = true }
+sha2 = { workspace = true }
+hkdf = { workspace = true }
+argon2 = { workspace = true }
+zeroize = { workspace = true }
+getrandom = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true }

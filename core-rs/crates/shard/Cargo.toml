@@ -1,0 +1,13 @@
+[package]
+name = "shard"
+description = "HeartShard blob -> chunks -> encrypted chunks -> RS shards pipeline with per-chunk/per-shard SHA-256"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+crypto = { path = "../crypto" }
+ida = { path = "../ida" }
+keypath = { path = "../keypath" }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,13 @@
+# research clones of upstream repos (reproducible via git clone, see docs/mixfile-study.md §0)
+.research/
+
+# rust
+target/
+
+# node
+node_modules/
+dist/
+
+# local db / secrets
+*.db
+*.idx
