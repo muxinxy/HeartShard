@@ -1,0 +1,245 @@
+:root {
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #e8e6e3;
+  background-color: #14161a;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.loading {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  color: #8a8f98;
+}
+
+/* ---------- 锁定屏 ---------- */
+
+.lock-screen {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  background: radial-gradient(ellipse at top, #1c2230 0%, #14161a 60%);
+}
+
+.lock-card {
+  width: 360px;
+  padding: 40px 32px;
+  border-radius: 16px;
+  background: #1b1e24;
+  border: 1px solid #2a2e36;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.lock-card h1 {
+  margin: 0 0 4px;
+  letter-spacing: 0.02em;
+}
+
+.tagline {
+  margin: 0 0 24px;
+  color: #8a8f98;
+  font-size: 13px;
+}
+
+.lock-card input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #333845;
+  background: #12141a;
+  color: inherit;
+  margin-bottom: 12px;
+}
+
+.lock-card input:focus {
+  outline: none;
+  border-color: #5b8def;
+}
+
+.lock-card button {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  background: #5b8def;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lock-card button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hint {
+  margin-top: 16px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.error {
+  color: #ef6a6a;
+  font-size: 13px;
+}
+
+/* ---------- 相册主界面 ---------- */
+
+.gallery {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 20px 60px;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0;
+  background: rgba(20, 22, 26, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #23262d;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.toolbar button,
+.blob-actions button {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #333845;
+  background: #1e2129;
+  color: inherit;
+  cursor: pointer;
+}
+
+.toolbar button:hover,
+.blob-actions button:hover {
+  border-color: #5b8def;
+}
+
+.toolbar button.secondary {
+  color: #9aa0aa;
+}
+
+.notice {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #1b2029;
+  border: 1px solid #2a3140;
+  font-size: 13px;
+}
+
+.notice.error {
+  border-color: #5c2b2b;
+  color: #ef6a6a;
+}
+
+.result {
+  padding: 2px 0;
+}
+
+.result code {
+  margin-left: 6px;
+  color: #9aa0aa;
+}
+
+.empty {
+  text-align: center;
+  margin-top: 120px;
+  color: #8a8f98;
+}
+
+.day-group h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #9aa0aa;
+  margin: 28px 0 8px;
+}
+
+.day-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #23262d;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.blob-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #191c22;
+}
+
+.blob-row + .blob-row {
+  border-top: 1px solid #23262d;
+}
+
+.blob-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.blob-main .name {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blob-main .meta {
+  color: #8a8f98;
+  font-size: 12.5px;
+}
+
+.blob-main code {
+  color: #6f7680;
+}
+
+.blob-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.badge.ok {
+  color: #7ed6a0;
+  background: rgba(126, 214, 160, 0.12);
+}
+
+.badge.bad {
+  color: #ef6a6a;
+  background: rgba(239, 106, 106, 0.12);
+}

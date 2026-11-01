@@ -22,8 +22,8 @@ Built for privacy-sensitive users who want their photos on multiple drives / NAS
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0** | MixFile algorithm study + core-rs (keypath / crypto / ida / shard) + locked test vectors | ✅ Done (`fe5d3e6`) |
-| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ⏳ In progress |
-| **M2** | S3 adapter + index sync (two-device simulation, Lamport merge) | Planned |
+| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ✅ Done (E2E 2/2 green) |
+| **M2** | S3 adapter + index sync (two-device simulation, Lamport merge) | ⏳ Next |
 | **M3** | **Android** Tauri shell + background transfer + WebDAV adapter | Planned (user priority: Android right after Windows) |
 | **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | Planned |
 | **M5** | iOS + FTP/FTPS + repair/rebalance tasks + threat-model document | Planned |

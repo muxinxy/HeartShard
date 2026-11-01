@@ -4,6 +4,9 @@
 # rust
 target/
 
+# tauri build-time generated schemas / platform glue
+apps/tauri/src-tauri/gen/
+
 # node
 node_modules/
 dist/

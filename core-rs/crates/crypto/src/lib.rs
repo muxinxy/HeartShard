@@ -209,6 +209,8 @@ const HKDF_LABEL_BLOB: &[u8] = b"heartshard/blob/v1";
 
 /// 从 MK 派生的会话子密钥集合。持会话生命周期，Drop 后密文零化
 /// （`Hkdf` 内部 prk 不做零化——MK 本就在会话内存中，见 docs/mixfile-study.md §5 Q2 注）。
+/// `Clone` 供命令层跨作用域传递；副本 Drop 时同样零化。
+#[derive(Clone)]
 pub struct DerivedKeys {
     master_key: Zeroizing<[u8; 32]>,
     master_salt: Vec<u8>,

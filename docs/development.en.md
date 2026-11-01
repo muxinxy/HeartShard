@@ -62,6 +62,15 @@ Hard boundaries (non-negotiable):
 2. The cloud only ever sees hash-based object keys — timestamps, sequential IDs, and original file names are forbidden in any object key. User-controlled strings such as album names live exclusively in the encrypted index.
 3. Logs never contain shard contents, full URL queries, keys, or passphrases.
 
+### 2.1 M1 integration (Windows)
+
+How `apps/tauri` (Tauri 2 + React + TS + Vite) wires into the core:
+
+- **src-tauri depends on the four core-rs crates directly via path deps** (`crypto/shard/keypath/ida`); Tauri commands do all encryption/sharding/persistence on the Rust side — the "no WASM layer" path allowed by the brief (§4.1). The WASM binding (`core-rs/bindings/wasm`) is deferred until in-page computation is needed; the "one core" principle is unaffected.
+- `src-tauri/src/library.rs` is the **pure business layer** (no Tauri types; directly testable): session keys (`unlock`/`lock`, MK in session memory only), local-directory mock Storage, encrypted manifests, and the M1 encrypted-JSON index.
+- `src-tauri/src/commands.rs` is the thin Tauri command layer (`Mutex<HeartCore>` session state).
+- M1 known simplifications (absorbed in M2+): whole-file in-memory reads (streaming comes with the import wizard); single manifest copy (≥2 redundant copies once S3 lands in M2); local index is a MANIFEST_KEY-encrypted JSON (replaced by the SQLCipher index.db in M2); MIME inferred from extension (EXIF in M1.5).
+
 ## 3. Building & Testing
 
 ```powershell

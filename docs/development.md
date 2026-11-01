@@ -62,6 +62,15 @@ docs/fixtures/               # 机器可读测试向量 + 生成脚本（Java/Py
 2. 云存储上永远只有哈希对象键——时间戳、顺序 ID、原始文件名禁止进入任何对象键。相册名等用户可控字符串只存在于加密索引。
 3. 日志不打印分片内容、完整 URL query、密钥或口令。
 
+### 2.1 M1 集成方式（Windows 端）
+
+`apps/tauri`（Tauri 2 + React + TS + Vite）与核心的接线：
+
+- **src-tauri 直接以 path 依赖引用 core-rs 四 crate**（`crypto/shard/keypath/ida`），Tauri command 在 Rust 侧完成全部加密/分片/落盘——简报 §4.1 允许的"不走 WASM 层"路径。WASM 绑定（`core-rs/bindings/wasm`）留到 WebView 侧需要页面内计算时再接，不影响"核心只有一份"原则。
+- `src-tauri/src/library.rs` 是**纯业务层**（无 Tauri 类型，可直接被集成测试调用）：会话密钥（`unlock`/`lock`，MK 仅会话内存）、本地目录模拟 Storage、加密 manifest、M1 加密 JSON 索引。
+- `src-tauri/src/commands.rs` 是 Tauri 命令层（薄封装 + `Mutex<HeartCore>` 会话状态）。
+- M1 已知简化（M2+ 消化）：整文件读入内存（流式随导入向导）；manifest 单副本（M2 加 S3 后冗余 ≥2）；本地索引为 MANIFEST_KEY 加密 JSON（M2 换 SQLCipher index.db）；MIME 按扩展名推断（EXIF 在 M1.5）。
+
 ## 3. 构建与测试
 
 ```powershell

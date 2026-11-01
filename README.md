@@ -24,8 +24,8 @@ HeartShard 是一个**纯客户端、无后端、端到端加密**的多云相�
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | **M0** | MixFile 算法研究 + core-rs（keypath / crypto / ida / shard）+ 测试向量锁定 | ✅ 完成（`fe5d3e6`） |
-| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ⏳ 进行中 |
-| **M2** | S3 适配器 + 索引同步（双设备模拟，Lamport 合并） | 计划中 |
+| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ✅ 完成（E2E 2/2 全绿） |
+| **M2** | S3 适配器 + 索引同步（双设备模拟，Lamport 合并） | ⏳ 下一步 |
 | **M3** | **Android** Tauri 壳 + 后台传输 + WebDAV 适配器 | 计划中（用户优先级：Android 仅次于 Windows） |
 | **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | 计划中 |
 | **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | 计划中 |
