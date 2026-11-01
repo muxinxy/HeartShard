@@ -96,6 +96,23 @@ export interface ImportRunReport {
   symlinks: string[];
 }
 
+export interface SettingsData {
+  chunk_size: number;
+  n: number;
+  m: number;
+  download_concurrency: number;
+  theme: string;
+}
+
+export interface AlbumInfo {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  sort_order: number;
+  cover_hash: string;
+  blob_count: number;
+}
+
 export interface ImportProgress {
   session_id: string;
   stage: string;
@@ -156,6 +173,20 @@ export const api = {
   verifyAll: () => invoke<VerifyReport[]>("verify_all"),
   importHistory: () => invoke<string[]>("import_history"),
   importReportGet: (file: string) => invoke<ImportRunReport>("import_report_get", { file }),
+  getSettings: () => invoke<SettingsData>("get_settings"),
+  updateSettings: (s: SettingsData) => invoke<void>("update_settings", { settings: s }),
+  changePassword: (oldPw: string, newPw: string) =>
+    invoke<void>("change_password", { oldPassword: oldPw, newPassword: newPw }),
+  listAlbums: () => invoke<AlbumInfo[]>("list_albums"),
+  albumCreate: (name: string, parentId: string | null) =>
+    invoke<string>("album_create", { name, parentId }),
+  albumRename: (albumId: string, name: string) =>
+    invoke<void>("album_rename", { albumId, name }),
+  albumSetSort: (albumId: string, sortOrder: number, parentId: string | null) =>
+    invoke<void>("album_set_sort", { albumId, sortOrder, parentId }),
+  albumSetCover: (albumId: string, blobHash: string) =>
+    invoke<void>("album_set_cover", { albumId, blobHash }),
+  thumbnailLarge: (blobHash: string) => invoke<string>("thumbnail_large", { blobHash }),
   pickDirectory: async (): Promise<string | null> => {
     const picked = await open({ directory: true, title: "选择要导入的目录" });
     return typeof picked === "string" ? picked : null;

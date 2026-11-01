@@ -403,6 +403,77 @@ button.link {
   font-size: 13px;
 }
 
+/* ---------- 设置页 / 相册树 ---------- */
+
+.settings-card {
+  background: #1b1e24;
+  border: 1px solid #2a2e36;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 8px 0 16px;
+}
+
+.settings-card input,
+.settings-card select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #333845;
+  background: #12141a;
+  color: inherit;
+  margin: 4px 0;
+}
+
+.settings-card button {
+  margin-top: 8px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #5b8def;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-card button:disabled {
+  opacity: 0.5;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 12px;
+}
+
+.setting-row span {
+  flex: 1;
+}
+
+.album-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #191c22;
+  border-bottom: 1px solid #23262d;
+  cursor: grab;
+}
+
+.album-row.dragging {
+  opacity: 0.4;
+}
+
+.album-row.drop-target {
+  border-top: 2px solid #5b8def;
+}
+
+.drag-handle {
+  color: #4a4e56;
+  cursor: grab;
+  font-size: 14px;
+}
+
 .wizard h2 {
   font-size: 16px;
   margin: 20px 0 8px;

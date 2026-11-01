@@ -16,6 +16,8 @@ import {
 } from "../lib/api";
 import { BlobDetailModal } from "./BlobDetailModal";
 import { ImportWizard } from "./ImportWizard";
+import { AlbumTree } from "./AlbumTree";
+import { SettingsPage } from "./SettingsPage";
 import { Thumb } from "./Thumb";
 import { TaskPanel, TaskProvider, useTasks } from "./TaskPanel";
 
@@ -44,6 +46,8 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [verify, setVerify] = useState<Record<string, VerifyState>>({});
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [albumTreeOpen, setAlbumTreeOpen] = useState(false);
   const [detailBlob, setDetailBlob] = useState<BlobEntry | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<string[] | null>(null);
@@ -248,6 +252,28 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     );
   }
 
+  if (settingsOpen) {
+    return (
+      <SettingsPage
+        onDone={() => {
+          setSettingsOpen(false);
+          refresh();
+        }}
+      />
+    );
+  }
+
+  if (albumTreeOpen) {
+    return (
+      <AlbumTree
+        onDone={() => {
+          setAlbumTreeOpen(false);
+          refresh();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="gallery">
       <header className="toolbar">
@@ -260,6 +286,8 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           {importing ? "导入中…" : "导入照片 / 视频"}
         </button>
         <button onClick={() => setWizardOpen(true)}>导入目录（向导）</button>
+        <button onClick={() => setAlbumTreeOpen(true)}>相册树</button>
+        <button onClick={() => setSettingsOpen(true)}>设置</button>
         <button onClick={doSync} disabled={syncing}>
           {syncing ? "同步中…" : "同步"}
         </button>

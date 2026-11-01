@@ -3,6 +3,23 @@
 import { useEffect, useState } from "react";
 import { api, BlobDetail, BlobEntry, formatBytes, formatDate } from "../lib/api";
 
+/// §10 大图预览：1024px 加密缓存缩略图（thumbnail_large 命令）。
+function LargePreview({ blobHash }: { blobHash: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .thumbnailLarge(blobHash)
+      .then(setSrc)
+      .catch(() => setError("大图未缓存（需从导出文件生成）"));
+  }, [blobHash]);
+
+  if (error) return <p className="hint">{error}</p>;
+  if (!src) return <p className="hint">生成大图预览中…</p>;
+  return <img src={src} alt="" style={{ maxWidth: "100%", borderRadius: 8 }} />;
+}
+
 const STORAGE_COLORS = ["#5b8def", "#7ed6a0", "#f0b45c", "#c792ea", "#ef8f6a", "#6ad0ef"];
 
 export function BlobDetailModal({
@@ -42,6 +59,12 @@ export function BlobDetailModal({
 
         {detail && (
           <div className="detail-body">
+            {detail.mime.startsWith("image/") && (
+              <>
+                <h3>大图预览</h3>
+                <LargePreview blobHash={detail.blob_hash} />
+              </>
+            )}
             <h3>元数据（EXIF 字段，拍摄时间为文件时间）</h3>
             <table className="meta-table">
               <tbody>
