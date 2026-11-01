@@ -34,6 +34,7 @@ pub struct BlobRecord {
 }
 
 /// 相册。`id` 为生成 uuid（字符串），跨设备稳定。
+/// `cover_hash` 为封面 blob（§10 封面设置；schema 超集列）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlbumRecord {
     pub id: String,
@@ -43,6 +44,7 @@ pub struct AlbumRecord {
     /// 目录导入来源路径——`local_only`，不同步（简报 §8.3）。
     pub import_source: Option<String>,
     pub local_only: bool,
+    pub cover_hash: String,
     pub created_at: i64,
     pub deleted_at: Option<i64>,
 }

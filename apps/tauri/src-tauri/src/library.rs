@@ -15,6 +15,7 @@ use crypto::{
     decrypt_bare, derive_master_key, encrypt_bare, generate_iv, CryptoError, DerivedKeys,
     KdfParams,
 };
+use zeroize::Zeroizing;
 use ida::CODEC_ID;
 use index::models::{BlobRecord, Versioned};
 use index::sqlite::IndexDb;
@@ -58,6 +59,8 @@ pub enum LibError {
     ManifestMissing(String),
     #[error("data error: {0}")]
     Data(String),
+    #[error("chunk {0}: shards present but cannot be decoded/decrypted")]
+    ChunkCorrupted(u32),
 }
 
 /// 会话期持有派生密钥与打开的加密索引；Drop 时零化。
@@ -66,6 +69,7 @@ pub struct HeartCore {
     keys: Option<DerivedKeys>,
     db: Option<IndexDb>,
     storages: Vec<StorageConfig>,
+    settings: Settings,
 }
 
 /// 时间线/列表条目。
@@ -188,6 +192,46 @@ struct KdfParamsFile {
     parallelism: u32,
 }
 
+/// MK 封装文件（§10 修改口令=重加密封装，不重传 shard）：
+/// `wrapped = encrypt_bare(KEK, iv, MK(32B) ‖ master_salt(32B))`，
+/// KEK = Argon2id(口令, kdf_salt)。子密钥全部从 MK 派生 → 改口令只重写本文件。
+#[derive(Debug, Serialize, Deserialize)]
+struct MkWrapFile {
+    v: u32,
+    kdf_salt_hex: String,
+    m_cost_kib: u32,
+    t_cost: u32,
+    parallelism: u32,
+    wrapped_hex: String,
+}
+
+/// §10 设置（非敏感参数；明文落盘 settings.json）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    /// 默认分片大小（256 KiB – 4 MiB；只影响新上传）
+    pub chunk_size: usize,
+    /// 纠删码总 shard 数
+    pub n: u8,
+    /// 恢复阈值
+    pub m: u8,
+    /// 下载（导出）并发数
+    pub download_concurrency: usize,
+    /// 主题：dark | light
+    pub theme: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            n: DEFAULT_N,
+            m: DEFAULT_M,
+            download_concurrency: 3,
+            theme: "dark".into(),
+        }
+    }
+}
+
 /// M2 加密 manifest（冗余写入每个启用的 Storage；M3 迁移到 manifest crate）。
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
@@ -223,11 +267,25 @@ struct ManifestShard {
 
 impl HeartCore {
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
-        Self { data_dir: data_dir.into(), keys: None, db: None, storages: Vec::new() }
+        Self {
+            data_dir: data_dir.into(),
+            keys: None,
+            db: None,
+            storages: Vec::new(),
+            settings: Settings::default(),
+        }
     }
 
     fn kdf_params_path(&self) -> PathBuf {
         self.data_dir.join("kdf.params.json")
+    }
+
+    fn mk_wrap_path(&self) -> PathBuf {
+        self.data_dir.join("mk.wrap")
+    }
+
+    fn settings_path(&self) -> PathBuf {
+        self.data_dir.join("settings.json")
     }
 
     fn index_db_path(&self) -> PathBuf {
@@ -247,42 +305,94 @@ impl HeartCore {
     }
 
     // -----------------------------------------------------------------------
-    // 会话
+    // 会话（MK 封装架构：随机 MK + 口令 KEK 封装，改口令只重写封装）
     // -----------------------------------------------------------------------
 
+    fn load_or_init_settings(&mut self) {
+        if self.settings_path().exists() {
+            if let Ok(raw) = fs::read(self.settings_path()) {
+                if let Ok(s) = serde_json::from_slice::<Settings>(&raw) {
+                    self.settings = s;
+                }
+            }
+        }
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    pub fn set_settings(&mut self, s: Settings) -> Result<(), LibError> {
+        self.settings = s;
+        fs::write(self.settings_path(), serde_json::to_vec_pretty(&self.settings)?)?;
+        Ok(())
+    }
+
+    /// 解封 MK：KEK = Argon2id(口令, kdf_salt) → decrypt_bare(wrapped) → MK‖master_salt。
+    fn unwrap_mk(wrap: &MkWrapFile, password: &str) -> Result<(Zeroizing<[u8; 32]>, [u8; 32]), LibError> {
+        let kdf_salt = hex::decode(&wrap.kdf_salt_hex)
+            .map_err(|e| LibError::Data(format!("kdf salt corrupt: {e}")))?;
+        let params = KdfParams {
+            m_cost_kib: wrap.m_cost_kib,
+            t_cost: wrap.t_cost,
+            parallelism: wrap.parallelism,
+        };
+        let kek = derive_master_key(password.as_bytes(), &kdf_salt, &params)?;
+        let wrapped = hex::decode(&wrap.wrapped_hex)
+            .map_err(|e| LibError::Data(format!("mk wrap corrupt: {e}")))?;
+        let payload = decrypt_bare(kek.as_ref(), &wrapped)
+            .map_err(|_| LibError::Data("wrong password (MK unwrap failed)".into()))?;
+        if payload.len() != 64 {
+            return Err(LibError::Data("mk wrap payload corrupt".into()));
+        }
+        let mut mk = Zeroizing::new([0u8; 32]);
+        mk.as_mut().copy_from_slice(&payload[..32]);
+        let mut master_salt = [0u8; 32];
+        master_salt.copy_from_slice(&payload[32..]);
+        Ok((mk, master_salt))
+    }
+
     pub fn unlock(&mut self, password: &str) -> Result<(), LibError> {
-        // 成本参数（m/t/p）可落盘调节；盐不落盘——从口令确定性派生：
-        // ① 新设备仅凭口令即可解密远端索引（简报 §7.3）；
-        // ② 每口令唯一盐，杜绝跨用户预计算彩虹表；
-        // ③ 离线爆破成本仍由 Argon2id 参数承担。
-        let params_file: KdfParamsFile = if self.kdf_params_path().exists() {
-            let raw = fs::read(self.kdf_params_path())?;
-            serde_json::from_slice::<KdfParamsFile>(&raw)
-                .map_err(|e| LibError::Data(format!("kdf params corrupt: {e}")))?
+        self.load_or_init_settings();
+
+        // MK 封装：首次生成随机 MK + 随机 kdf 盐；之后每次解锁只做解封。
+        // 改口令 = 用新 KEK 重加密同一 MK（change_password），shard/索引全不动。
+        let wrap: MkWrapFile = if self.mk_wrap_path().exists() {
+            let raw = fs::read(self.mk_wrap_path())?;
+            serde_json::from_slice::<MkWrapFile>(&raw)
+                .map_err(|e| LibError::Data(format!("mk wrap corrupt: {e}")))?
         } else {
+            fs::create_dir_all(&self.data_dir)?;
+            let mut mk = Zeroizing::new([0u8; 32]);
+            getrandom::getrandom(mk.as_mut()).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+            let mut ms = [0u8; 32];
+            getrandom::getrandom(&mut ms).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+            let mut kdf_salt = [0u8; 16];
+            getrandom::getrandom(&mut kdf_salt).map_err(|e| LibError::Data(format!("rng: {e}")))?;
             let p = KdfParams::standard();
-            let f = KdfParamsFile {
-                salt_hex: String::new(),
+            let kek = derive_master_key(password.as_bytes(), &kdf_salt, &p)?;
+            let mut payload = [0u8; 64];
+            payload[..32].copy_from_slice(mk.as_ref());
+            payload[32..].copy_from_slice(&ms);
+            let iv = generate_iv()?;
+            let wrapped = encrypt_bare(kek.as_ref(), &iv, &payload)?;
+            let f = MkWrapFile {
+                v: 1,
+                kdf_salt_hex: hex::encode(kdf_salt),
                 m_cost_kib: p.m_cost_kib,
                 t_cost: p.t_cost,
                 parallelism: p.parallelism,
+                wrapped_hex: hex::encode(wrapped),
             };
-            fs::create_dir_all(&self.data_dir)?;
-            fs::write(self.kdf_params_path(), serde_json::to_vec_pretty(&f)?)?;
+            fs::write(self.mk_wrap_path(), serde_json::to_vec_pretty(&f)?)?;
             f
         };
-        let params = KdfParams {
-            m_cost_kib: params_file.m_cost_kib,
-            t_cost: params_file.t_cost,
-            parallelism: params_file.parallelism,
-        };
-        let salt_full = crypto::sha256(format!("heartshard/argon2-salt/v1:{}", password).as_bytes());
-        let mk = derive_master_key(password.as_bytes(), &salt_full[..16], &params)?;
-        let master_salt = format!("heartshard-master-salt-v1:{}", hex::encode(salt_full));
-        let keys = DerivedKeys::new(mk, master_salt.as_bytes())?;
+
+        let (mk, master_salt) = Self::unwrap_mk(&wrap, password)?;
+        let keys = DerivedKeys::new(mk, &master_salt)?;
         self.keys = Some(keys.clone());
 
-        // 打开 SQLCipher 索引（错口令在此处即失败：file is not a database）
+        // 打开 SQLCipher 索引（错口令在解封 MK 时即失败）
         let index_key_hex = hex::encode(keys.index_key.as_ref());
         let db = match IndexDb::open(self.index_db_path(), &index_key_hex) {
             Ok(db) => db,
@@ -320,6 +430,45 @@ impl HeartCore {
         }
 
         self.db = Some(db);
+        Ok(())
+    }
+
+    /// §10 修改口令：旧口令解封 MK → 新 KEK 重加密封装 → 写回。
+    /// 子密钥全部从 MK 派生 → shard/manifest/索引完全不动（不重传 shard）。
+    pub fn change_password(&self, old_password: &str, new_password: &str) -> Result<(), LibError> {
+        let raw = fs::read(self.mk_wrap_path())?;
+        let wrap: MkWrapFile = serde_json::from_slice::<MkWrapFile>(&raw)
+            .map_err(|e| LibError::Data(format!("mk wrap corrupt: {e}")))?;
+        let (_mk, _ms) = Self::unwrap_mk(&wrap, old_password)?; // 验证旧口令
+
+        let mut new_kdf_salt = [0u8; 16];
+        getrandom::getrandom(&mut new_kdf_salt).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+        let params = KdfParams {
+            m_cost_kib: wrap.m_cost_kib,
+            t_cost: wrap.t_cost,
+            parallelism: wrap.parallelism,
+        };
+        let new_kek = derive_master_key(new_password.as_bytes(), &new_kdf_salt, &params)?;
+
+        // 用旧口令重新解封拿到原始 payload（MK‖master_salt），避免依赖会话状态
+        let kdf_salt = hex::decode(&wrap.kdf_salt_hex).map_err(|e| LibError::Data(format!("{e}")))?;
+        let old_kek = derive_master_key(old_password.as_bytes(), &kdf_salt, &params)?;
+        let wrapped = hex::decode(&wrap.wrapped_hex).map_err(|e| LibError::Data(format!("{e}")))?;
+        let payload = decrypt_bare(old_kek.as_ref(), &wrapped)?;
+
+        let iv = generate_iv()?;
+        let new_wrapped = encrypt_bare(new_kek.as_ref(), &iv, &payload)?;
+        let new_wrap = MkWrapFile {
+            v: 1,
+            kdf_salt_hex: hex::encode(new_kdf_salt),
+            m_cost_kib: params.m_cost_kib,
+            t_cost: params.t_cost,
+            parallelism: params.parallelism,
+            wrapped_hex: hex::encode(new_wrapped),
+        };
+        let tmp = self.mk_wrap_path().with_extension("tmp");
+        fs::write(&tmp, serde_json::to_vec_pretty(&new_wrap)?)?;
+        fs::rename(&tmp, self.mk_wrap_path())?;
         Ok(())
     }
 
@@ -426,8 +575,8 @@ impl HeartCore {
         let lamport = db.lamport()? + 1;
         let me = db.device_id()?;
         let blob_key = keys.blob_key(&blob_sha256)?;
-
-        let encoded = encode_blob(&blob, &blob_key, DEFAULT_CHUNK_SIZE, DEFAULT_N, DEFAULT_M, generate_iv)?;
+        let s = self.settings.clone();
+        let encoded = encode_blob(&blob, &blob_key, s.chunk_size, s.n, s.m, generate_iv)?;
 
         // shard 分散：shard_index % storages.len()（同一 chunk 的 shard 必落不同 Storage，
         // 当 Storage 数 ≥ n 时天然满足；不足时按权重轮转、不重复放同 chunk 的 shard，§2.2）
@@ -452,9 +601,9 @@ impl HeartCore {
             codec: CODEC_ID.to_string(),
             blob_sha256: blob_hex.clone(),
             total_len: encoded.total_len as u64,
-            chunk_size: DEFAULT_CHUNK_SIZE as u32,
-            n: DEFAULT_N,
-            m: DEFAULT_M,
+            chunk_size: s.chunk_size as u32,
+            n: s.n,
+            m: s.m,
             created_at: now_secs(),
             file_name: file_name_of(path),
             mime: mime_of(path),
@@ -488,9 +637,9 @@ impl HeartCore {
                 width: 0,
                 height: 0,
                 taken_at,
-                chunk_size: DEFAULT_CHUNK_SIZE as i64,
-                n: DEFAULT_N as i64,
-                m: DEFAULT_M as i64,
+                chunk_size: s.chunk_size as i64,
+                n: s.n as i64,
+                m: s.m as i64,
                 manifest_storage_key: manifest_key_path.clone(),
                 created_at: manifest.created_at,
                 deleted_at: None,
@@ -588,6 +737,214 @@ impl HeartCore {
             fs::create_dir_all(parent)?;
         }
         fs::write(dest_path, &decoded)?;
+        Ok(())
+    }
+
+    /// §11 Range 下载：只拉取覆盖 `[offset, offset+len)` 字节区间的 chunk 分片，
+    /// 解密后截取写入。用于大图预览/局部读取，不落整文件。
+    pub fn export_blob_range(
+        &self,
+        blob_hash: &str,
+        offset: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let blob_hex = blob_hash.to_lowercase();
+        let manifest = self.load_manifest(&blob_hex)?;
+        let chunk_size = manifest.chunk_size as u64;
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        // 覆盖区间 [offset, offset+len) 的 chunk 序号 [first, last]
+        let first_chunk = offset / chunk_size;
+        let last_chunk = (offset + len - 1) / chunk_size;
+        if last_chunk >= manifest.chunks.len() as u64 {
+            return Err(LibError::Data("range beyond blob end".into()));
+        }
+
+        let blob_hash_bytes: [u8; 32] = decode_hash(&manifest.blob_sha256)?;
+        let blob_key = keys.blob_key(&blob_hash_bytes)?;
+        let total_chunks = manifest.chunks.len() as u32;
+        let mut out: Vec<u8> = Vec::with_capacity(len as usize);
+
+        for ci in first_chunk..=last_chunk {
+            let ci = ci as u32;
+            let info = &manifest.chunks[ci as usize];
+            let ct_len = info.ciphertext_len as usize;
+            let chunk_infos = [ChunkManifestInfo {
+                plaintext_sha256: decode_hash(&info.plaintext_sha256)?,
+                ciphertext_len: ct_len,
+            }];
+            let mut available: Vec<(u8, Vec<u8>)> = Vec::new();
+            for s in manifest.shards.iter().filter(|s| s.chunk_index == ci) {
+                if let Some(store) = self.store_by_id(&s.storage_id).ok() {
+                    if let Some(data) = store.get(&s.remote_key) {
+                        available.push((s.shard_index, data));
+                    }
+                }
+            }
+            if available.len() < usize::from(manifest.m) {
+                return Err(LibError::Data(format!("chunk {ci}: not enough shards for range read")));
+            }
+            available.sort_by_key(|(i, _)| *i);
+            let refs: Vec<(u8, &[u8])> =
+                available.iter().map(|(i, d)| (*i, d.as_slice())).collect();
+            let ciphertext = ida::decode_shards(&refs, config_for(manifest.n, manifest.m)?, ct_len)
+                .map_err(|_| LibError::ChunkCorrupted(ci))?;
+            let plaintext = crypto::decrypt_chunk(
+                &blob_key,
+                &ciphertext,
+                &blob_hash_bytes,
+                ci,
+                total_chunks,
+            )
+            .map_err(|_| LibError::ChunkCorrupted(ci))?;
+            let chunk_start = ci as u64 * chunk_size;
+            // 本 chunk 在输出区间的起止
+            let read_from = offset.saturating_sub(chunk_start) as usize;
+            let read_to = std::cmp::min(plaintext.len(), (offset + len - chunk_start) as usize);
+            if read_from < plaintext.len() && read_to > read_from {
+                out.extend_from_slice(&plaintext[read_from..read_to]);
+            }
+        }
+        Ok(out)
+    }
+
+    // ---------------- §10 相册树命令 ----------------
+
+    /// 相册树数据（未删除 + blob 计数 + 封面）。
+    pub fn list_albums(&self) -> Result<Vec<AlbumInfo>, LibError> {        let db = self.db_or_err()?;
+        let mut albums: Vec<AlbumInfo> = db
+            .load_albums()?
+            .into_iter()
+            .filter(|v| v.record.deleted_at.is_none())
+            .map(|v| AlbumInfo {
+                id: v.record.id.clone(),
+                name: v.record.name,
+                parent_id: v.record.parent_id,
+                sort_order: v.record.sort_order,
+                cover_hash: v.record.cover_hash,
+                blob_count: 0,
+            })
+            .collect();
+        let stats = db.album_stats()?;
+        for a in &mut albums {
+            if let Some((_, cnt, _)) = stats.iter().find(|(id, _, _)| id == &a.id) {
+                a.blob_count = *cnt;
+            }
+        }
+        albums.sort_by_key(|a| (a.sort_order, a.name.clone()));
+        Ok(albums)
+    }
+
+    /// 创建相册（手动）。
+    pub fn album_create(&self, name: &str, parent_id: Option<String>) -> Result<String, LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let mut id = [0u8; 16];
+        getrandom::getrandom(&mut id).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+        let album_id = hex::encode(id);
+        let lamport = db.lamport()? + 1;
+        db.upsert_album(&Versioned {
+            lamport,
+            device_id: me,
+            record: index::models::AlbumRecord {
+                id: album_id.clone(),
+                name: name.to_string(),
+                parent_id,
+                sort_order: 0,
+                import_source: None,
+                local_only: false,
+                cover_hash: String::new(),
+                created_at: now_secs(),
+                deleted_at: None,
+            },
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(album_id)
+    }
+
+    /// 重命名相册。
+    pub fn album_rename(&self, album_id: &str, name: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let existing = db
+            .load_albums()?
+            .into_iter()
+            .find(|v| v.record.id == album_id)
+            .ok_or_else(|| LibError::Data(format!("album {album_id} not found")))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.name = name.to_string();
+        db.upsert_album(&Versioned { lamport, device_id: me, record })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// 拖拽排序/移动：更新 sort_order（可选同时改 parent）。
+    pub fn album_set_sort(
+        &self,
+        album_id: &str,
+        sort_order: i64,
+        parent_id: Option<String>,
+    ) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let existing = db
+            .load_albums()?
+            .into_iter()
+            .find(|v| v.record.id == album_id)
+            .ok_or_else(|| LibError::Data(format!("album {album_id} not found")))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.sort_order = sort_order;
+        if parent_id.is_some() {
+            record.parent_id = parent_id;
+        }
+        db.upsert_album(&Versioned { lamport, device_id: me, record })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// §10 封面设置。
+    pub fn album_set_cover(&self, album_id: &str, blob_hash: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let lamport = db.lamport()? + 1;
+        db.album_set_cover(album_id, &blob_hash.to_lowercase(), lamport, &me)?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// §10 大图预览：1024px 缩略图（加密缓存，独立于列表 256px）。
+    pub fn thumbnail_large(&self, blob_hash: &str) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?;
+        const SIZE: u32 = 1024;
+        let cache = self.data_dir.join("thumbs").join(format!("{blob_hash}.{SIZE}.enc"));
+        if cache.exists() {
+            let enc = fs::read(&cache)?;
+            let png = decrypt_bare(keys.manifest_key.as_ref(), &enc)?;
+            use base64::Engine as _;
+            return Ok(format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png)
+            ));
+        }
+        Err(LibError::Data("large thumbnail not cached yet".into()))
+    }
+
+    /// 生成并缓存大图（从导出的源文件）。
+    pub fn thumbnail_large_put(&self, blob_hash: &str, src_path: &Path) -> Result<(), LibError> {
+        let bytes = fs::read(src_path)?;
+        let png = Self::generate_thumbnail_from_bytes(&bytes, 1024)?;
+        let keys = self.keys_or_err()?;
+        let thumb_dir = self.data_dir.join("thumbs");
+        fs::create_dir_all(&thumb_dir)?;
+        let cache = thumb_dir.join(format!("{blob_hash}.1024.enc"));
+        let enc = encrypt_bare(keys.manifest_key.as_ref(), &generate_iv()?, &png)?;
+        let tmp = cache.with_extension("tmp");
+        fs::write(&tmp, &enc)?;
+        fs::rename(&tmp, &cache)?;
         Ok(())
     }
 
@@ -1050,6 +1407,21 @@ pub struct ShardPlacement {
     pub size: u32,
 }
 
+/// §10 相册树条目。
+#[derive(Debug, Clone, Serialize)]
+pub struct AlbumInfo {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub sort_order: i64,
+    pub cover_hash: String,
+    pub blob_count: i64,
+}
+
+fn config_for(n: u8, m: u8) -> Result<ida::DispersalConfig, LibError> {
+    ida::DispersalConfig::new(n, m).map_err(LibError::from)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BlobDetail {
     pub blob_hash: String,
@@ -1360,6 +1732,7 @@ impl HeartCore {
                     parent_id,
                     sort_order: index as i64,
                     import_source: Some(import_source),
+                    cover_hash: String::new(),
                     local_only: true,
                     created_at: now_secs(),
                     deleted_at: None,
@@ -1404,6 +1777,7 @@ impl HeartCore {
                     continue;
                 }
                 let keys = keys.clone();
+                let settings = self.settings.clone();
                 let stores: Vec<Box<dyn BlobStore>> =
                     self.storages.iter().map(|s| s.store()).collect::<Result<Vec<_>, _>>()?;
                 let blob_sha: [u8; 32] = decode_hash(&row.sha256)?;
@@ -1420,9 +1794,9 @@ impl HeartCore {
                     let encoded = encode_blob(
                         &bytes,
                         &blob_key,
-                        DEFAULT_CHUNK_SIZE,
-                        DEFAULT_N,
-                        DEFAULT_M,
+                        settings.chunk_size,
+                        settings.n,
+                        settings.m,
                         generate_iv,
                     )
                     .map_err(|e| e.to_string())?;
@@ -1514,9 +1888,9 @@ impl HeartCore {
             codec: CODEC_ID.to_string(),
             blob_sha256: blob_hex.to_string(),
             total_len: encoded.total_len as u64,
-            chunk_size: DEFAULT_CHUNK_SIZE as u32,
-            n: DEFAULT_N,
-            m: DEFAULT_M,
+            chunk_size: self.settings.chunk_size as u32,
+            n: self.settings.n,
+            m: self.settings.m,
             created_at: now_secs(),
             file_name: row.rel_path.rsplit('/').next().unwrap_or("file").to_string(),
             mime: mime_of(Path::new(&row.abs_path)),
@@ -1556,9 +1930,9 @@ impl HeartCore {
                 width: 0,
                 height: 0,
                 taken_at: row.mtime,
-                chunk_size: DEFAULT_CHUNK_SIZE as i64,
-                n: DEFAULT_N as i64,
-                m: DEFAULT_M as i64,
+                chunk_size: self.settings.chunk_size as i64,
+                n: self.settings.n as i64,
+                m: self.settings.m as i64,
                 manifest_storage_key: manifest_object_key(blob_hex)?,
                 created_at: manifest.created_at,
                 deleted_at: None,

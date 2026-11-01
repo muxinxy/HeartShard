@@ -109,16 +109,33 @@ pub fn sync_now(
     }
 
     // ---- 发布 ----
-    let new_lamport = lamport + 1;
+    // §7 delta：只发布 last_published 之后变化的记录（首次 last_published=0 → 全量）。
+    // delta 为空时跳过发布（省对象；拉取端靠 applied 幂等）。
+    let since = db.last_published()?;
     let mut delta = IndexDelta {
         device_id: me.clone(),
-        lamport: new_lamport,
+        lamport: lamport + 1,
         created_at: now,
-        blobs: db.load_blobs()?,
-        albums: db.load_albums()?,
-        blob_albums: db.load_blob_albums()?,
+        blobs: db.blobs_changed_since(since)?,
+        albums: db.albums_changed_since(since)?,
+        blob_albums: db.blob_albums_changed_since(since)?,
     };
+    let new_lamport = lamport + 1;
     delta.strip_local_only();
+    let delta_empty =
+        delta.blobs.is_empty() && delta.albums.is_empty() && delta.blob_albums.is_empty();
+    if delta_empty {
+        // 无变化：不发布对象，时钟不推进
+        db.set_last_published(lamport)?;
+        return Ok(SyncReport {
+            published_lamport: lamport,
+            pulled_objects,
+            applied_objects,
+            skipped_objects: skipped,
+            stores_ok: Vec::new(),
+            stores_failed: Vec::new(),
+        });
+    }
     let key = delta.object_key()?;
     let iv = crypto::generate_iv()?;
     let payload = delta.encode(manifest_key, &iv)?;
@@ -139,6 +156,7 @@ pub fn sync_now(
     }
 
     db.set_lamport(new_lamport)?;
+    db.set_last_published(new_lamport)?;
     Ok(SyncReport {
         published_lamport: new_lamport,
         pulled_objects,

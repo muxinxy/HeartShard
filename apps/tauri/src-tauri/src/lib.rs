@@ -66,6 +66,16 @@ pub fn run() {
             commands::verify_all,
             commands::import_history,
             commands::import_report_get,
+            commands::get_settings,
+            commands::update_settings,
+            commands::change_password,
+            commands::list_albums,
+            commands::album_create,
+            commands::album_rename,
+            commands::album_set_sort,
+            commands::album_set_cover,
+            commands::export_blob_range,
+            commands::thumbnail_large,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1637,6 +1637,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "webpki-roots 0.26.11",
+ "zeroize",
 ]
 
 [[package]]

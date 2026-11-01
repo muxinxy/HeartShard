@@ -95,6 +95,7 @@ mod tests {
                     sort_order: 0,
                     import_source: Some("D:/pics/travel".into()),
                     local_only: true,
+        cover_hash: String::new(),
                     created_at: 1,
                     deleted_at: None,
                 },

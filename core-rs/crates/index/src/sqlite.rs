@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS albums(
   sort_order INTEGER NOT NULL DEFAULT 0,
   import_source TEXT,
   local_only INTEGER NOT NULL DEFAULT 0,
+  cover_hash TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT 0,
   deleted_at INTEGER,
   sync_lamport INTEGER NOT NULL DEFAULT 0,
@@ -92,7 +93,8 @@ CREATE TABLE IF NOT EXISTS storages(
 CREATE TABLE IF NOT EXISTS sync_state(
   device_id TEXT NOT NULL,
   lamport_clock INTEGER NOT NULL DEFAULT 0,
-  last_pull_at INTEGER NOT NULL DEFAULT 0
+  last_pull_at INTEGER NOT NULL DEFAULT 0,
+  last_published INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sync_applied(
   device_id TEXT NOT NULL,
@@ -180,6 +182,51 @@ impl IndexDb {
             params![value as i64],
         )?;
         Ok(())
+    }
+
+    /// 增量发布游标（§7 delta）：该 lamport 之前的记录已全量发布过。
+    pub fn last_published(&self) -> Result<u64, IndexError> {
+        let v: Option<i64> = self
+            .conn
+            .query_row("SELECT last_published FROM sync_state LIMIT 1", [], |r| r.get(0))
+            .optional()?;
+        Ok(v.unwrap_or(0).max(0) as u64)
+    }
+
+    pub fn set_last_published(&self, value: u64) -> Result<(), IndexError> {
+        self.conn.execute(
+            "UPDATE sync_state SET last_published = ?1",
+            params![value as i64],
+        )?;
+        Ok(())
+    }
+
+    /// §7 delta：sync_lamport > since 的记录（增量发布用）。
+    pub fn blobs_changed_since(&self, since: u64) -> Result<Vec<Versioned<BlobRecord>>, IndexError> {
+        Ok(self
+            .load_blobs()?
+            .into_iter()
+            .filter(|v| v.lamport > since)
+            .collect())
+    }
+
+    pub fn albums_changed_since(&self, since: u64) -> Result<Vec<Versioned<AlbumRecord>>, IndexError> {
+        Ok(self
+            .load_albums()?
+            .into_iter()
+            .filter(|v| v.lamport > since)
+            .collect())
+    }
+
+    pub fn blob_albums_changed_since(
+        &self,
+        since: u64,
+    ) -> Result<Vec<Versioned<BlobAlbumRecord>>, IndexError> {
+        Ok(self
+            .load_blob_albums()?
+            .into_iter()
+            .filter(|v| v.lamport > since)
+            .collect())
     }
 
     pub fn mark_applied(&self, device_id: &str, lamport: u64, at: i64) -> Result<(), IndexError> {
@@ -306,11 +353,11 @@ impl IndexDb {
         };
         if outcome == MergeOutcome::TookRemote {
             self.conn.execute(
-                "INSERT INTO albums(id,name,parent_id,sort_order,import_source,local_only,created_at,deleted_at,sync_lamport,sync_device)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+                "INSERT INTO albums(id,name,parent_id,sort_order,import_source,local_only,cover_hash,created_at,deleted_at,sync_lamport,sync_device)
+                 VALUES(?1,?2,?3,?4,?5,?6,?11,?7,?8,?9,?10)
                  ON CONFLICT(id) DO UPDATE SET
                    name=?2, parent_id=?3, sort_order=?4, import_source=?5, local_only=?6,
-                   created_at=?7, deleted_at=?8, sync_lamport=?9, sync_device=?10",
+                   cover_hash=?11, created_at=?7, deleted_at=?8, sync_lamport=?9, sync_device=?10",
                 params![
                     r.id,
                     r.name,
@@ -322,20 +369,52 @@ impl IndexDb {
                     r.deleted_at,
                     v.lamport as i64,
                     v.device_id,
+                    r.cover_hash,
                 ],
             )?;
         }
         Ok(outcome)
     }
 
+    /// §10 封面设置：更新相册 cover_hash（同步列 lamport 推进）。
+    pub fn album_set_cover(
+        &self,
+        album_id: &str,
+        cover_hash: &str,
+        lamport: u64,
+        device_id: &str,
+    ) -> Result<(), IndexError> {
+        self.conn.execute(
+            "UPDATE albums SET cover_hash = ?2, sync_lamport = ?3, sync_device = ?4 WHERE id = ?1",
+            params![album_id, cover_hash, lamport as i64, device_id],
+        )?;
+        Ok(())
+    }
+
+    /// §10 拖拽排序/移动：更新 sort_order 与 parent_id。
+    pub fn album_set_sort(
+        &self,
+        album_id: &str,
+        sort_order: i64,
+        lamport: u64,
+        device_id: &str,
+    ) -> Result<(), IndexError> {
+        self.conn.execute(
+            "UPDATE albums SET sort_order = ?2, sync_lamport = ?3, sync_device = ?4 WHERE id = ?1",
+            params![album_id, sort_order, lamport as i64, device_id],
+        )?;
+        Ok(())
+    }
+
+    /// §10 相册树数据：未删除相册（含封面 hash）。
     pub fn load_albums(&self) -> Result<Vec<Versioned<AlbumRecord>>, IndexError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id,name,parent_id,sort_order,import_source,local_only,created_at,deleted_at,sync_lamport,sync_device FROM albums",
+            "SELECT id,name,parent_id,sort_order,import_source,local_only,cover_hash,created_at,deleted_at,sync_lamport,sync_device FROM albums",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Versioned {
-                lamport: row.get::<_, i64>(8)?.max(0) as u64,
-                device_id: row.get(9)?,
+                lamport: row.get::<_, i64>(9)?.max(0) as u64,
+                device_id: row.get(10)?,
                 record: AlbumRecord {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -343,10 +422,25 @@ impl IndexDb {
                     sort_order: row.get(3)?,
                     import_source: row.get(4)?,
                     local_only: row.get::<_, i64>(5)? != 0,
-                    created_at: row.get(6)?,
-                    deleted_at: row.get(7)?,
+                    cover_hash: row.get(6)?,
+                    created_at: row.get(7)?,
+                    deleted_at: row.get(8)?,
                 },
             })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 相册内 blob 计数 + 封面候选（§10 相册树 UI）。
+    pub fn album_stats(&self) -> Result<Vec<(String, i64, Option<String>)>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ba.album_id, COUNT(*), MIN(ba.blob_hash)
+             FROM blob_albums ba
+             WHERE ba.deleted_at IS NULL
+             GROUP BY ba.album_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?))
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -488,14 +582,14 @@ impl IndexDb {
         import_source: &str,
     ) -> Result<Option<Versioned<AlbumRecord>>, IndexError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id,name,parent_id,sort_order,import_source,local_only,created_at,deleted_at,sync_lamport,sync_device
+            "SELECT id,name,parent_id,sort_order,import_source,local_only,cover_hash,created_at,deleted_at,sync_lamport,sync_device
              FROM albums WHERE import_source = ?1 LIMIT 1",
         )?;
         let row = stmt
             .query_row(params![import_source], |row| {
                 Ok(Versioned {
-                    lamport: row.get::<_, i64>(8)?.max(0) as u64,
-                    device_id: row.get(9)?,
+                    lamport: row.get::<_, i64>(9)?.max(0) as u64,
+                    device_id: row.get(10)?,
                     record: AlbumRecord {
                         id: row.get(0)?,
                         name: row.get(1)?,
@@ -503,8 +597,9 @@ impl IndexDb {
                         sort_order: row.get(3)?,
                         import_source: row.get(4)?,
                         local_only: row.get::<_, i64>(5)? != 0,
-                        created_at: row.get(6)?,
-                        deleted_at: row.get(7)?,
+                        cover_hash: row.get(6)?,
+                        created_at: row.get(7)?,
+                        deleted_at: row.get(8)?,
                     },
                 })
             })

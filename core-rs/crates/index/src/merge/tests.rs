@@ -27,6 +27,8 @@ fn album(id: &str, name: &str) -> AlbumRecord {
         sort_order: 0,
         import_source: None,
         local_only: false,
+        cover_hash: String::new(),
+        local_only: false,
         created_at: 1,
         deleted_at: None,
     }

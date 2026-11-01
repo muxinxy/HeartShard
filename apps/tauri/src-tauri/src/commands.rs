@@ -206,6 +206,110 @@ pub fn import_report_get(
     state.core.lock().unwrap().import_report_get(&file).map_err(err_str)
 }
 
+// ---------------- §10 设置页 / 相册树 / Range ----------------
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, SessionState>) -> Result<crate::library::Settings, String> {
+    Ok(state.core.lock().unwrap().settings().clone())
+}
+
+#[tauri::command]
+pub fn update_settings(
+    settings: crate::library::Settings,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.core.lock().unwrap().set_settings(settings).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn change_password(
+    old_password: String,
+    new_password: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .change_password(&old_password, &new_password)
+        .map_err(err_str)
+}
+
+#[tauri::command]
+pub fn list_albums(state: State<'_, SessionState>) -> Result<Vec<crate::library::AlbumInfo>, String> {
+    state.core.lock().unwrap().list_albums().map_err(err_str)
+}
+
+#[tauri::command]
+pub fn album_create(
+    name: String,
+    parent_id: Option<String>,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state.core.lock().unwrap().album_create(&name, parent_id).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn album_rename(
+    album_id: String,
+    name: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.core.lock().unwrap().album_rename(&album_id, &name).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn album_set_sort(
+    album_id: String,
+    sort_order: i64,
+    parent_id: Option<String>,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .album_set_sort(&album_id, sort_order, parent_id)
+        .map_err(err_str)
+}
+
+#[tauri::command]
+pub fn album_set_cover(
+    album_id: String,
+    blob_hash: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.core.lock().unwrap().album_set_cover(&album_id, &blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn export_blob_range(
+    blob_hash: String,
+    offset: u64,
+    len: u64,
+    state: State<'_, SessionState>,
+) -> Result<Vec<u8>, String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .export_blob_range(&blob_hash, offset, len)
+        .map_err(err_str)
+}
+
+#[tauri::command]
+pub fn thumbnail_large(
+    blob_hash: String,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .thumbnail_large(&blob_hash)
+        .map_err(err_str)
+}
+
 #[tauri::command]
 pub fn storage_status(state: State<'_, SessionState>) -> Result<Vec<StorageStatus>, String> {
     state.core.lock().unwrap().storage_status().map_err(err_str)

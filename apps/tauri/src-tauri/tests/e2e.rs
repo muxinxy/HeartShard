@@ -125,6 +125,12 @@ fn two_devices_sync_converge_timelines() {
     let mut a = HeartCore::new(dev_a.path());
     a.unlock("album-pass").unwrap();
     setup_shared_storages(&mut a, &[cloud1.path(), cloud2.path()]);
+    // MK 封装架构下，设备需共享 mk.wrap 才能派生相同子密钥（模拟"凭口令加入"）
+    std::fs::copy(
+        dev_a.path().join("mk.wrap"),
+        dev_b.path().join("mk.wrap"),
+    )
+    .unwrap();
     let mut b = HeartCore::new(dev_b.path());
     b.unlock("album-pass").unwrap();
     setup_shared_storages(&mut b, &[cloud1.path(), cloud2.path()]);
