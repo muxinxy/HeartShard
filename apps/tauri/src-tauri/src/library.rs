@@ -638,7 +638,7 @@ impl HeartCore {
     /// 修复任务（M5）：对每个受损 chunk，用健康 shard RS 重组出原密文，
     /// 重新分散并把受损 shard 位置重写（RS 编码确定性 ⇒ shard 字节与 SHA 不变）。
     pub fn repair_blob(&self, blob_hash: &str) -> Result<RepairReport, LibError> {
-        let keys = self.keys_or_err()?.clone();
+        self.keys_or_err()?;
         let blob_hex = blob_hash.to_lowercase();
         let manifest = self.load_manifest(&blob_hex)?;
         let config = ida::DispersalConfig::new(manifest.n, manifest.m)?;

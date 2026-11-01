@@ -141,7 +141,49 @@ Each milestone ends with: runnable commands, known platform limitations, next-mi
 
 ## 7. Known Limitations & Deferred Work
 
-- RS benchmarks are crate-official; M1 must measure locally in release mode (1 MiB chunk, n=4).
-- `DerivedKeys` holds the MK (session memory) and the `Hkdf` prk is not zeroized on drop → harden in M2.
-- shard tests rebuild Argon2 keys each time (~2-3s in debug) → introduce a session key cache in M1.
+- RS benchmarks are crate-official; measure locally in release mode for large batches.
+- `DerivedKeys` holds the MK (session memory) and the `Hkdf` prk is not zeroized on drop → harden later.
 - Byte-identical gzip across languages is not part of the contract (compare decompressed content); flate2 and Java 17 headers match in practice (OS=0xff).
+- Sync publishes full state (idempotent); incremental deltas are a bandwidth optimization.
+
+## 8. Build & Release (Artifacts)
+
+### 8.1 Windows (portable exe + installers)
+
+```powershell
+cd apps\tauri
+pnpm tauri build
+# Artifacts:
+#   src-tauri\target\release\HeartShard.exe                    ← portable single file
+#   src-tauri\target\release\bundle\nsis\HeartShard_0.1.0_x64-setup.exe
+#   src-tauri\target\release\bundle\msi\HeartShard_0.1.0_x64_en-US.msi
+```
+
+### 8.2 Android (APK, aarch64)
+
+One-time prerequisites: `rustup target add aarch64-linux-android` (other ABIs likewise), NDK 28.x (already present in the local mise android-sdk), JDK 17.
+
+```powershell
+cd apps\tauri
+$env:JAVA_HOME  = "D:\Dev\mise\installs\java\17.0.2"
+$env:NDK_HOME   = "D:\Dev\mise\installs\android-sdk\23.0\ndk\28.2.13676358"
+pnpm tauri android init     # first time; generates src-tauri\gen\android
+
+# Signing (keystore generated at src-tauri\gen\heartshard-release.keystore, password heartshard-2026)
+$env:TAURI_ANDROID_KEYSTORE_PATH       = "D:\Documents\Code\HeartShard\apps\tauri\src-tauri\gen\heartshard-release.keystore"
+$env:TAURI_ANDROID_KEYSTORE_PASSWORD   = "heartshard-2026"
+$env:TAURI_ANDROID_KEY_ALIAS           = "heartshard"
+$env:TAURI_ANDROID_KEY_PASSWORD        = "heartshard-2026"
+
+pnpm tauri android build --apk --target aarch64
+# Artifact: src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release.apk
+```
+
+### 8.3 Platform limits (stated as-is)
+
+| Platform | Status | Reason |
+|---|---|---|
+| Windows | ✅ buildable & runnable | primary dev platform |
+| Android | ✅ APK buildable | NDK + rust targets present |
+| iOS | ❌ not buildable on this machine | requires macOS + Xcode (Tauri requirement); code is already `#[cfg(mobile)]`-compatible |
+| HarmonyOS | ⚠️ not built | requires DevEco Studio + OHOS SDK + `aarch64-unknown-linux-ohos` target (rust ≥1.78) and ohos_napi_rs bindings — no DevEco on this machine; M4 leftover |

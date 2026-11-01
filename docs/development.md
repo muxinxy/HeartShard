@@ -142,6 +142,79 @@ Rust 同上断言
 ## 7. 已知限制与遗留（随里程碑消化）
 
 - RS 基准数据来自 crate 官方，M1 需在本机 release 模式实测（1 MiB chunk、n=4）。
-- `DerivedKeys` 持有 MK（会话内存），`Hkdf` prk 未 Drop 零化 → M2 加固。
-- shard 测试重复构造 Argon2 密钥（debug ~2-3s/次）→ M1 引入会话级密钥缓存。
+- `DerivedKeys` 持有 MK（会话内存），`Hkdf` prk 未 Drop 零化 → 后续加固。
 - gzip 字节级跨语言一致不列入契约（以解压内容为准）；实测 flate2 与 Java 17 头字节一致（OS=0xff）。
+- 同步为全量状态发布（幂等），增量 delta 是带宽优化项。
+
+## 8. 构建/发布（产物）
+
+### 8.1 Windows（便携 exe + 安装包）
+
+```powershell
+cd apps\tauri
+pnpm tauri build
+# 产物：
+#   src-tauri\target\release\HeartShard.exe                    ← 便携单文件
+#   src-tauri\target\release\bundle\nsis\HeartShard_0.1.0_x64-setup.exe
+#   src-tauri\target\release\bundle\msi\HeartShard_0.1.0_x64_en-US.msi
+```
+
+### 8.2 Android（APK，aarch64）
+
+前置（一次性，本机已完成）：
+
+```powershell
+rustup target add aarch64-linux-android   # 其余 ABI 同理
+scoop install msys2                        # SQLCipher → OpenSSL 交叉编译需要 unix-path 语义的 perl
+& 'D:\Scoop\apps\msys2\current\usr\bin\bash.exe' -lc 'pacman -Sy perl --noconfirm'
+```
+
+关键坑位记录（2026-11-02 实战）：
+1. **openssl 交叉编译拒绝 MSWin32 perl**（strawberry 报"doesn't produce Unix like paths"）→
+   必须用 MSYS2 的 `/usr/bin/perl`；
+2. **`ANDROID_NDK_ROOT` 必须显式设置**（openssl 的 android Configure 靠它定位工具链，
+   只有 `NDK_HOME` 不够）；
+3. Windows 与 Android 构建不要并发（共享 `pnpm build` 的 dist/ 会互相踩）。
+
+```powershell
+cd apps\tauri
+$env:JAVA_HOME           = "D:\Dev\mise\installs\java\17.0.2"
+$env:NDK_HOME            = "D:\Dev\mise\installs\android-sdk\23.0\ndk\28.2.13676358"
+$env:ANDROID_NDK_ROOT    = $env:NDK_HOME
+$env:OPENSSL_SRC_PERL    = "D:\Scoop\apps\msys2\current\usr\bin\perl.exe"
+pnpm tauri android init     # 首次；生成 src-tauri\gen\android
+
+# 签名（密钥库已生成：src-tauri\gen\heartshard-release.keystore，口令 heartshard-2026）
+$env:TAURI_ANDROID_KEYSTORE_PATH       = "D:\Documents\Code\HeartShard\apps\tauri\src-tauri\gen\heartshard-release.keystore"
+$env:TAURI_ANDROID_KEYSTORE_PASSWORD   = "heartshard-2026"
+$env:TAURI_ANDROID_KEY_ALIAS           = "heartshard"
+$env:TAURI_ANDROID_KEY_PASSWORD        = "heartshard-2026"
+
+pnpm tauri android build --apk --target aarch64
+# 产物：src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release.apk
+```
+
+**无管理员/开发者模式时的备选路线**（2026-11-02 实战验证）：
+`pnpm tauri android build` 的最后一步需要创建符号链接（把 `libtauri_lib.so` 链入
+`jniLibs`），非管理员会在此失败。绕过方法（本项目 buildSrc 已内置支持）：
+
+```powershell
+# 1) .so 已由 cargo 编出，手动拷入 jniLibs
+New-Item -ItemType Directory -Force -Path src-tauri\gen\android\app\src\main\jniLibs\arm64-v8a | Out-Null
+Copy-Item target\aarch64-linux-android\release\libtauri_lib.so src-tauri\gen\android\app\src\main\jniLibs\arm64-v8a\
+
+# 2) 跳过 CLI 的 rust/链接任务（BuildTask.kt 已内置 HEARTSHARD_SKIP_RUST_TASK 守卫）
+# 3) 纯 gradle 打包（app/build.gradle.kts 已内置 release 签名配置，读同样的环境变量）
+cd src-tauri\gen\android
+.\gradlew.bat assembleRelease --no-daemon
+# 产物：app\build\outputs\apk\arm64\release\app-arm64-release.apk（apksigner 验签通过）
+```
+
+### 8.3 平台限制（如实声明）
+
+| 平台 | 状态 | 原因 |
+|---|---|---|
+| Windows | ✅ 可构建可运行 | 主开发平台 |
+| Android | ✅ 可构建 APK | NDK + rust target 齐备 |
+| iOS | ❌ 本机不可构建 | 需要 macOS + Xcode（Tauri 官方要求）；代码层已 `#[cfg(mobile)]` 兼容 |
+| 鸿蒙 | ⚠️ 未构建 | 需要 DevEco Studio + OHOS SDK + `aarch64-unknown-linux-ohos` target（rust ≥1.78）与 ohos_napi_rs 绑定——本机无 DevEco，属 M4 遗留 |

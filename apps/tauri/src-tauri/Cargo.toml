@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "HeartShard desktop shell (Windows first; Android/iOS later)"
 authors = ["HeartShard contributors"]
 edition = "2024"
+default-run = "heartshard-tauri"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -42,6 +43,10 @@ webpki-roots = "0.26"
 
 [dev-dependencies]
 tempfile = "3"
+
+# 本地补丁：android 目标强制 no-asm（见 patches/openssl-src/src/lib.rs 注释）
+[patch.crates-io]
+openssl-src = { path = "../../../patches/openssl-src" }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

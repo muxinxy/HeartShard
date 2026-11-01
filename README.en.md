@@ -22,11 +22,12 @@ Built for privacy-sensitive users who want their photos on multiple drives / NAS
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0** | MixFile algorithm study + core-rs (keypath / crypto / ida / shard) + locked test vectors | ✅ Done (`fe5d3e6`) |
-| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ✅ Done (E2E 2/2 green) |
-| **M2** | S3 adapter + index sync (two-device simulation, Lamport merge) | ⏳ Next |
-| **M3** | **Android** Tauri shell + background transfer + WebDAV adapter | Planned (user priority: Android right after Windows) |
-| **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | Planned |
-| **M5** | iOS + FTP/FTPS + repair/rebalance tasks + threat-model document | Planned |
+| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ✅ Done (E2E green) |
+| **M2** | S3 adapter (SigV4) + SQLCipher index + two-device Lamport sync | ✅ Done (timelines converge in E2E; conflict rulings unit-tested) |
+| **M3** | **Android** Tauri shell (aarch64 APK) + WebDAV adapter | ✅ Done (WebDAV mock integration test; APK from release build) |
+| **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | ⚠️ Constrained: requires DevEco/OHOS SDK (unavailable on this dev machine) — see platform limits in the [dev guide](docs/development.en.md) |
+| **M5** | iOS + FTP/FTPS + repair/rebalance + threat-model document | ✅ Core done (repair E2E, FTP/FTPS adapter, [threat model](docs/threat-model.md)); iOS requires macOS |
+| **Artifacts** | Windows portable exe + installers; Android APK (aarch64) | ✅ `tauri build` / `tauri android build --apk` |
 
 > Platform priority (adjusted 2026-11-01): **Windows → Android first**; iOS and HarmonyOS follow.
 

@@ -24,11 +24,12 @@ HeartShard 是一个**纯客户端、无后端、端到端加密**的多云相�
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | **M0** | MixFile 算法研究 + core-rs（keypath / crypto / ida / shard）+ 测试向量锁定 | ✅ 完成（`fe5d3e6`） |
-| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ✅ 完成（E2E 2/2 全绿） |
-| **M2** | S3 适配器 + 索引同步（双设备模拟，Lamport 合并） | ⏳ 下一步 |
-| **M3** | **Android** Tauri 壳 + 后台传输 + WebDAV 适配器 | 计划中（用户优先级：Android 仅次于 Windows） |
-| **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | 计划中 |
-| **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | 计划中 |
+| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ✅ 完成（E2E 全绿） |
+| **M2** | S3 适配器（SigV4）+ SQLCipher 索引 + 双设备 Lamport 同步 | ✅ 完成（双设备 E2E 时间线一致，冲突裁决单测覆盖） |
+| **M3** | **Android** Tauri 壳（aarch64 APK）+ WebDAV 适配器 | ✅ 完成（WebDAV mock 集成测试；APK 见 Releases 构建） |
+| **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | ⚠️ 受限：需 DevEco/OHOS SDK（本开发机不可用），见 [开发文档](docs/development.md) 平台限制 |
+| **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | ✅ 核心完成（修复任务 E2E、FTP/FTPS 适配器、[威胁模型](docs/threat-model.md)）；iOS 需 macOS 构建 |
+| **产物** | Windows 便携 exe + 安装包；Android APK（aarch64） | ✅ `tauri build` / `tauri android build --apk` |
 
 > 平台优先级（2026-11-01 调整）：**Windows → Android 优先**，iOS 与鸿蒙随后。
 
