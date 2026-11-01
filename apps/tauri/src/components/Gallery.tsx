@@ -11,6 +11,7 @@ import {
   SyncOutcome,
   VerifyReport,
 } from "../lib/api";
+import { ImportWizard } from "./ImportWizard";
 
 interface VerifyState {
   report: VerifyReport;
@@ -26,6 +27,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [storages, setStorages] = useState<StorageStatus[]>([]);
   const [verify, setVerify] = useState<Record<string, VerifyState>>({});
   const [error, setError] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -154,6 +156,17 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     return [...map.entries()];
   }, [blobs]);
 
+  if (wizardOpen) {
+    return (
+      <ImportWizard
+        onDone={() => {
+          setWizardOpen(false);
+          refresh();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="gallery">
       <header className="toolbar">
@@ -165,6 +178,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         <button onClick={doImport} disabled={importing}>
           {importing ? "导入中…" : "导入照片 / 视频"}
         </button>
+        <button onClick={() => setWizardOpen(true)}>导入目录（向导）</button>
         <button onClick={doSync} disabled={syncing}>
           {syncing ? "同步中…" : "同步"}
         </button>

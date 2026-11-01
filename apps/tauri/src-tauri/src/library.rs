@@ -873,3 +873,549 @@ fn decode_hash(hex_str: &str) -> Result<[u8; 32], LibError> {
         .try_into()
         .map_err(|_| LibError::Data(format!("hash length != 32: {hex_str}")))
 }
+
+// ---------------------------------------------------------------------------
+// 目录导入五阶段向导（简报 §8.5）：扫描 → 预览 → 幂等建相册 → 上传(两级进度) → 报告
+// ---------------------------------------------------------------------------
+
+/// 导入跳过名单（§8.5 扫描阶段）。
+const IMPORT_SKIP_NAMES: &[&str] = &[".DS_Store", "Thumbs.db", "desktop.ini", "$RECYCLE.BIN", ".git"];
+/// 目录深度上限（§8.2）：超出部分合并到第 8 层。
+const IMPORT_MAX_DEPTH: usize = 8;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DirScanResult {
+    pub session_id: String,
+    pub files_scanned: usize,
+    pub total_bytes: u64,
+    pub dirs: Vec<String>,
+    /// 深度 > 8 被合并的相对目录
+    pub truncated: Vec<String>,
+    /// 跳过的符号链接
+    pub symlinks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewAlbum {
+    pub rel_path: String,
+    pub file_count: usize,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportPreview {
+    pub session_id: String,
+    pub albums: Vec<PreviewAlbum>,
+    pub total_files: usize,
+    pub total_bytes: u64,
+    /// 已在索引中的文件数（将跳过上传，§8.4）
+    pub already_in_index: usize,
+    pub truncated: Vec<String>,
+    pub symlinks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportRunReport {
+    pub session_id: String,
+    pub albums_created: usize,
+    pub albums_reused: usize,
+    pub imported: usize,
+    pub skipped_duplicate: usize,
+    pub failed: Vec<String>,
+    /// 连续失败 5 个触发暂停（§8.5），剩余文件留在 staging 供续传
+    pub paused: bool,
+    pub truncated: Vec<String>,
+    pub symlinks: Vec<String>,
+}
+
+/// 两级进度（§8.5）：相册级 + 文件级，经 Tauri event 推送。
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportProgress {
+    pub session_id: String,
+    pub stage: String,
+    pub album_name: Option<String>,
+    pub album_index: usize,
+    pub album_total: usize,
+    pub files_done: usize,
+    pub files_total: usize,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImportOptions {
+    pub create_empty_albums: bool,
+    pub concurrency: usize,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        Self { create_empty_albums: true, concurrency: 3 }
+    }
+}
+
+/// import_source 归一化（§8.3）：`\`→`/`、盘符小写、去首尾斜杠。其余大小写保留。
+pub fn normalize_import_source(abs_dir: &str) -> String {
+    let s = abs_dir.replace('\\', "/");
+    let s = s.trim_matches('/');
+    if s.len() >= 2 && s.as_bytes()[1] == b':' {
+        format!("{}{}", (s.as_bytes()[0] as char).to_ascii_lowercase(), &s[1..])
+    } else {
+        s.to_string()
+    }
+}
+
+/// 读文件，对 Windows AV/索引器造成的瞬时 NotFound/SharingViolation 做退避重试。
+/// 批量导入（数千新建文件）在 Windows 上必然遇到这类瞬态；永久缺失交给
+/// staging 失败 + 续传机制。
+fn read_file_retry(path: &Path) -> Result<Vec<u8>, String> {
+    let mut last_err = String::new();
+    for (attempt, delay_ms) in [0u64, 50, 200, 500].iter().enumerate() {
+        if *delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
+        }
+        match fs::read(path) {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => {
+                last_err = format!("read: {e}");
+                let _ = attempt;
+            }
+            Err(e) => return Err(format!("read: {e}")),
+        }
+    }
+    Err(last_err)
+}
+
+/// 扫描阶段（阶段 1）：walkdir 递归（不跟符号链接），跳过名单，SHA-256 预计算，
+/// 结果写 import_staging。会话元数据（目录树/截断/符号链接）落 data_dir JSON。
+impl HeartCore {
+    pub fn import_scan_dir(
+        &mut self,
+        dir: &Path,
+        create_empty_albums: bool,
+    ) -> Result<DirScanResult, LibError> {
+        self.keys_or_err()?;
+        let db = self.db_or_err()?;
+        let session_id = {
+            let mut sid = [0u8; 8];
+            getrandom::getrandom(&mut sid).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+            hex::encode(sid)
+        };
+        let mut result = DirScanResult {
+            session_id: session_id.clone(),
+            files_scanned: 0,
+            total_bytes: 0,
+            dirs: Vec::new(),
+            truncated: Vec::new(),
+            symlinks: Vec::new(),
+        };
+
+        let mut stack: Vec<(PathBuf, String, usize)> = vec![(dir.to_path_buf(), String::new(), 0)];
+        // 根目录自身也是一个相册（§8.2：所选目录的直接文件归入该相册）
+        result.dirs.push(String::new());
+        while let Some((abs, rel, depth)) = stack.pop() {
+            let entries = fs::read_dir(&abs)?;
+            let mut has_children = false;
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if IMPORT_SKIP_NAMES.contains(&name.as_str()) {
+                    continue;
+                }
+                let meta = fs::symlink_metadata(entry.path())?;
+                if meta.file_type().is_symlink() {
+                    result.symlinks.push(entry.path().to_string_lossy().to_string());
+                    continue;
+                }
+                let child_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+                if meta.is_dir() {
+                    has_children = true;
+                    // 深度 8 截断（§8.2）
+                    let (store_rel, store_depth) = if depth + 1 > IMPORT_MAX_DEPTH {
+                        result.truncated.push(child_rel.clone());
+                        (rel.clone(), depth) // 合并进第 8 层相册
+                    } else {
+                        (child_rel.clone(), depth + 1)
+                    };
+                    result.dirs.push(store_rel.clone());
+                    stack.push((entry.path(), store_rel, store_depth));
+                } else if meta.is_file() {
+                    has_children = true;
+                    let bytes = fs::read(entry.path())?;
+                    let sha = hex::encode(crypto::sha256(&bytes));
+                    let mtime = meta
+                        .modified()?
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    db.staging_upsert(&session_id, &entry.path().to_string_lossy(), &child_rel, meta.len() as i64, mtime, &sha)?;
+                    result.files_scanned += 1;
+                    result.total_bytes += meta.len();
+                }
+            }
+            if !has_children && create_empty_albums && !rel.is_empty() {
+                // 空目录也建空相册（UI 开关，§8.2）——记录目录供阶段 3 使用
+                result.dirs.push(rel.clone());
+            }
+        }
+        result.dirs.sort();
+        result.dirs.dedup();
+
+        // 会话元数据落盘（续传时阶段 3/5 需要）
+        let meta = serde_json::json!({
+            "root": dir.to_string_lossy(),
+            "dirs": result.dirs,
+            "truncated": result.truncated,
+            "symlinks": result.symlinks,
+        });
+        fs::write(
+            self.data_dir.join(format!("import-session-{session_id}.json")),
+            serde_json::to_vec_pretty(&meta)?,
+        )?;
+        Ok(result)
+    }
+
+    /// 预览阶段（阶段 2）：相册树、文件数、总量、去重预计上传量。
+    pub fn import_preview(&self, session_id: &str) -> Result<ImportPreview, LibError> {
+        self.keys_or_err()?;
+        let db = self.db_or_err()?;
+        let rows = db.staging_load(session_id)?;
+        let known: std::collections::HashSet<String> = db
+            .load_blobs()?
+            .into_iter()
+            .map(|v| v.record.hash)
+            .collect();
+
+        let mut by_dir: std::collections::BTreeMap<String, PreviewAlbum> = std::collections::BTreeMap::new();
+        let mut preview = ImportPreview {
+            session_id: session_id.to_string(),
+            albums: Vec::new(),
+            total_files: rows.len(),
+            total_bytes: 0,
+            already_in_index: 0,
+            truncated: Vec::new(),
+            symlinks: Vec::new(),
+        };
+        if let Ok(meta_raw) = fs::read(self.data_dir.join(format!("import-session-{session_id}.json"))) {
+            if let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&meta_raw) {
+                preview.truncated = serde_json::from_value(meta["truncated"].clone()).unwrap_or_default();
+                preview.symlinks = serde_json::from_value(meta["symlinks"].clone()).unwrap_or_default();
+            }
+        }
+        for r in &rows {
+            preview.total_bytes += r.size.max(0) as u64;
+            if known.contains(&r.sha256) {
+                preview.already_in_index += 1;
+            }
+            let dir = r.rel_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+            let album = by_dir.entry(dir.to_string()).or_insert_with(|| PreviewAlbum {
+                rel_path: dir.to_string(),
+                file_count: 0,
+                bytes: 0,
+            });
+            album.file_count += 1;
+            album.bytes += r.size.max(0) as u64;
+        }
+        preview.albums = by_dir.into_values().collect();
+        Ok(preview)
+    }
+
+    /// 会话根目录（scan 时记录）。
+    fn import_session_root(&self, session_id: &str) -> Result<PathBuf, LibError> {
+        let raw = fs::read(self.data_dir.join(format!("import-session-{session_id}.json")))?;
+        let meta: serde_json::Value = serde_json::from_slice(&raw)?;
+        Ok(PathBuf::from(
+            meta["root"].as_str().ok_or_else(|| LibError::Data("session meta corrupt".into()))?,
+        ))
+    }
+
+    fn import_session_meta_list(&self, session_id: &str, key: &str) -> Vec<String> {
+        fs::read(self.data_dir.join(format!("import-session-{session_id}.json")))
+            .ok()
+            .and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok())
+            .and_then(|meta| serde_json::from_value(meta[key].clone()).ok())
+            .unwrap_or_default()
+    }
+
+    /// 上传阶段（阶段 3+4）：幂等建相册 + 逐文件上传（并发 3，两级进度，
+    /// 连续失败 5 个暂停，staging 续传）。cancel 置位即停（已传保留）。
+    pub fn import_execute(
+        &self,
+        session_id: &str,
+        opts: ImportOptions,
+        cancel: &std::sync::atomic::AtomicBool,
+        progress: &dyn Fn(ImportProgress),
+    ) -> Result<ImportRunReport, LibError> {
+        use std::sync::atomic::Ordering;
+
+        let keys = self.keys_or_err()?.clone();
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let mut report = ImportRunReport {
+            session_id: session_id.to_string(),
+            albums_created: 0,
+            albums_reused: 0,
+            imported: 0,
+            skipped_duplicate: 0,
+            failed: Vec::new(),
+            paused: false,
+            truncated: self.import_session_meta_list(session_id, "truncated"),
+            symlinks: self.import_session_meta_list(session_id, "symlinks"),
+        };
+        let rows = db.staging_load(session_id)?;
+        let total_files = rows.len();
+        let total_bytes: u64 = rows.iter().map(|r| r.size.max(0) as u64).sum();
+
+        // ---- 阶段 3：按 import_source 幂等建相册（§8.3）----
+        let dirs = self.import_session_meta_list(session_id, "dirs");
+        let mut album_ids: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let root = self.import_session_root(session_id)?;
+        let mut sorted_dirs = dirs.clone();
+        sorted_dirs.sort(); // 父目录先于子目录（路径前缀序）
+        for (index, dir_rel) in sorted_dirs.iter().enumerate() {
+            let abs_dir = root.join(dir_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+            let import_source = normalize_import_source(&abs_dir.to_string_lossy());
+            let album_name = dir_rel.rsplit('/').next().unwrap_or(dir_rel).to_string();
+            progress(ImportProgress {
+                session_id: session_id.to_string(),
+                stage: "albums".into(),
+                album_name: Some(album_name.clone()),
+                album_index: index,
+                album_total: sorted_dirs.len(),
+                files_done: 0,
+                files_total: total_files,
+                bytes_done: 0,
+                bytes_total: total_bytes,
+            });
+            if let Some(existing) = db.album_by_import_source(&import_source)? {
+                album_ids.insert(dir_rel.clone(), existing.record.id);
+                report.albums_reused += 1;
+                continue;
+            }
+            let parent_id = dir_rel
+                .rsplit_once('/')
+                .and_then(|(p, _)| album_ids.get(p).cloned());
+            let mut id = [0u8; 16];
+            getrandom::getrandom(&mut id).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+            let album_id = hex::encode(id);
+            let lamport = db.lamport()? + 1;
+            db.upsert_album(&Versioned {
+                lamport,
+                device_id: me.clone(),
+                record: index::models::AlbumRecord {
+                    id: album_id.clone(),
+                    name: album_name.clone(),
+                    parent_id,
+                    sort_order: index as i64,
+                    import_source: Some(import_source),
+                    local_only: true,
+                    created_at: now_secs(),
+                    deleted_at: None,
+                },
+            })?;
+            db.set_lamport(lamport)?;
+            album_ids.insert(dir_rel.clone(), album_id);
+            report.albums_created += 1;
+        }
+
+        // ---- 阶段 4：上传（并发 workers + 主线程 DB/manifest 写）----
+        let known: std::collections::HashSet<String> =
+            db.load_blobs()?.into_iter().map(|v| v.record.hash).collect();
+        let mut queue: std::collections::VecDeque<index::sqlite::StagingRow> =
+            rows.into_iter().filter(|r| r.status != "done").collect();
+        let mut files_done = 0usize;
+        let mut bytes_done: u64 = 0;
+        let mut consecutive_failures = 0usize;
+        let mut inflight: Vec<(
+            index::sqlite::StagingRow,
+            std::thread::JoinHandle<Result<shard::EncodedBlob, String>>,
+        )> = Vec::new();
+        let concurrency = opts.concurrency.max(1).min(8);
+
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                break; // 取消：已传保留，未传留 staging
+            }
+            if consecutive_failures >= 5 && inflight.is_empty() {
+                report.paused = true; // 连续失败 5 个暂停（§8.5）
+                break;
+            }
+            // 填满 worker 槽位
+            while inflight.len() < concurrency {
+                let Some(row) = queue.pop_front() else { break };
+                // 主线程去重（§8.4）：已在索引 → staging done，不占 worker
+                if known.contains(&row.sha256) {
+                    db.staging_set_status(row.id, "done", "")?;
+                    report.skipped_duplicate += 1;
+                    files_done += 1;
+                    bytes_done += row.size.max(0) as u64;
+                    continue;
+                }
+                let keys = keys.clone();
+                let stores: Vec<Box<dyn BlobStore>> =
+                    self.storages.iter().map(|s| s.store()).collect::<Result<Vec<_>, _>>()?;
+                let blob_sha: [u8; 32] = decode_hash(&row.sha256)?;
+                let abs_path = PathBuf::from(&row.abs_path);
+                let handle = std::thread::spawn(move || -> Result<shard::EncodedBlob, String> {
+                    let bytes = read_file_retry(&abs_path)?;
+                    let blob_key = keys.blob_key(&blob_sha).map_err(|e| e.to_string())?;
+                    let encoded = encode_blob(
+                        &bytes,
+                        &blob_key,
+                        DEFAULT_CHUNK_SIZE,
+                        DEFAULT_N,
+                        DEFAULT_M,
+                        generate_iv,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    for s in &encoded.shards {
+                        let store = &stores[usize::from(s.shard_index) % stores.len()];
+                        store.put(&s.object_key, &s.data).map_err(|e| e.to_string())?;
+                    }
+                    Ok(encoded)
+                });
+                inflight.push((row, handle));
+            }
+            if inflight.is_empty() {
+                break;
+            }
+            // 收割一个完成的 worker，主线程做 DB/manifest 写
+            let (row, handle) = inflight.remove(0);
+            let file_rel = row.rel_path.clone();
+            let size = row.size.max(0) as u64;
+            let album_dir = row.rel_path.rsplit_once('/').map(|(d, _)| d.to_string());
+            match handle.join() {
+                Ok(Ok(encoded)) => {
+                    consecutive_failures = 0;
+                    let blob_hex = hex::encode(encoded.blob_sha256);
+                    let album_id = album_dir
+                        .as_ref()
+                        .and_then(|d| album_ids.get(d).cloned());
+                    self.finalize_import_file(&keys, db, &me, &row, &encoded, &blob_hex, album_id)?;
+                    report.imported += 1;
+                }
+                Ok(Err(e)) => {
+                    consecutive_failures += 1;
+                    db.staging_set_status(row.id, "failed", &e)?;
+                    report.failed.push(format!("{file_rel}: {e}"));
+                }
+                Err(_) => {
+                    consecutive_failures += 1;
+                    db.staging_set_status(row.id, "failed", "worker panicked")?;
+                    report.failed.push(format!("{file_rel}: worker panicked"));
+                }
+            }
+            // 连续失败 5 个立即暂停（§8.5）：剩余文件留 staging 续传
+            if consecutive_failures >= 5 {
+                report.paused = true;
+                break;
+            }
+            files_done += 1;
+            bytes_done += size;
+            let progress_album = album_dir.as_ref().and_then(|d| {
+                album_ids
+                    .get(d)
+                    .and_then(|_| d.rsplit('/').next().map(|n| n.to_string()))
+            });
+            progress(ImportProgress {
+                session_id: session_id.to_string(),
+                stage: "upload".into(),
+                album_name: progress_album,
+                album_index: 0,
+                album_total: 0,
+                files_done,
+                files_total: total_files,
+                bytes_done,
+                bytes_total: total_bytes,
+            });
+        }
+
+        Ok(report)
+    }
+
+    /// 上传成功后的主线程收尾：manifest 冗余写入 + blob 记录 + 相册关联 + staging done。
+    #[allow(clippy::too_many_arguments)]
+    fn finalize_import_file(
+        &self,
+        keys: &crypto::DerivedKeys,
+        db: &index::sqlite::IndexDb,
+        me: &str,
+        row: &index::sqlite::StagingRow,
+        encoded: &shard::EncodedBlob,
+        blob_hex: &str,
+        album_id: Option<String>,
+    ) -> Result<(), LibError> {
+        let manifest = Manifest {
+            version: 1,
+            codec: CODEC_ID.to_string(),
+            blob_sha256: blob_hex.to_string(),
+            total_len: encoded.total_len as u64,
+            chunk_size: DEFAULT_CHUNK_SIZE as u32,
+            n: DEFAULT_N,
+            m: DEFAULT_M,
+            created_at: now_secs(),
+            file_name: row.rel_path.rsplit('/').next().unwrap_or("file").to_string(),
+            mime: mime_of(Path::new(&row.abs_path)),
+            chunks: encoded
+                .chunks
+                .iter()
+                .map(|c| ManifestChunk {
+                    plaintext_sha256: hex::encode(c.plaintext_sha256),
+                    ciphertext_len: c.ciphertext.len() as u32,
+                })
+                .collect(),
+            shards: encoded
+                .shards
+                .iter()
+                .map(|s| ManifestShard {
+                    chunk_index: s.chunk_index,
+                    shard_index: s.shard_index,
+                    storage_id: self.storages[usize::from(s.shard_index) % self.storages.len()].id(),
+                    remote_key: s.object_key.clone(),
+                    size: s.data.len() as u32,
+                    sha256: hex::encode(s.sha256),
+                })
+                .collect(),
+        };
+        self.save_manifest(blob_hex, &manifest)?;
+
+        let blob_sha256: [u8; 32] = decode_hash(blob_hex)?;
+        let lamport = db.lamport()? + 1;
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me.to_string(),
+            record: BlobRecord {
+                hash: blob_hex.to_string(),
+                file_name: manifest.file_name.clone(),
+                size: manifest.total_len as i64,
+                mime: manifest.mime.clone(),
+                width: 0,
+                height: 0,
+                taken_at: row.mtime,
+                chunk_size: DEFAULT_CHUNK_SIZE as i64,
+                n: DEFAULT_N as i64,
+                m: DEFAULT_M as i64,
+                manifest_storage_key: manifest_object_key(blob_hex)?,
+                created_at: manifest.created_at,
+                deleted_at: None,
+            },
+        })?;
+        db.set_lamport(lamport)?;
+
+        if let Some(album_id) = album_id {
+            let lamport = db.lamport()? + 1;
+            db.upsert_blob_album(&Versioned {
+                lamport,
+                device_id: me.to_string(),
+                record: index::models::BlobAlbumRecord {
+                    blob_hash: blob_hex.to_string(),
+                    album_id,
+                    added_at: now_secs(),
+                    deleted_at: None,
+                },
+            })?;
+            db.set_lamport(lamport)?;
+        }
+        db.staging_set_status(row.id, "done", "")?;
+        Ok(())
+    }
+}

@@ -108,10 +108,13 @@ CREATE TABLE IF NOT EXISTS import_staging(
   size INTEGER NOT NULL,
   mtime INTEGER NOT NULL,
   sha256 TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending'
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_blobs_taken_at ON blobs(taken_at);
 CREATE INDEX IF NOT EXISTS idx_shards_blob ON shards(blob_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_staging_session_path
+  ON import_staging(session_id, abs_path);
 ";
 
 impl IndexDb {
@@ -411,6 +414,116 @@ impl IndexDb {
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
+
+    // ---------------- import_staging（§8.5 五阶段向导续传） ----------------
+
+    /// 写入/更新一条 staging 记录（同 session+abs_path 幂等）。
+    pub fn staging_upsert(
+        &self,
+        session_id: &str,
+        abs_path: &str,
+        rel_path: &str,
+        size: i64,
+        mtime: i64,
+        sha256_hex: &str,
+    ) -> Result<i64, IndexError> {
+        self.conn.execute(
+            "INSERT INTO import_staging(session_id,abs_path,rel_path,size,mtime,sha256,status)
+             VALUES(?1,?2,?3,?4,?5,?6,'pending')
+             ON CONFLICT(session_id, abs_path) DO UPDATE SET
+               rel_path=?3, size=?4, mtime=?5, sha256=?6",
+            params![session_id, abs_path, rel_path, size, mtime, sha256_hex],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// 按 status 更新 staging 行。
+    pub fn staging_set_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: &str,
+    ) -> Result<(), IndexError> {
+        self.conn.execute(
+            "UPDATE import_staging SET status = ?2, error = ?3 WHERE id = ?1",
+            params![id, status, error],
+        )?;
+        Ok(())
+    }
+
+    pub fn staging_load(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StagingRow>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,abs_path,rel_path,size,mtime,sha256,status,error FROM import_staging
+             WHERE session_id = ?1 ORDER BY rel_path",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(StagingRow {
+                id: row.get(0)?,
+                abs_path: row.get(1)?,
+                rel_path: row.get(2)?,
+                size: row.get(3)?,
+                mtime: row.get(4)?,
+                sha256: row.get(5)?,
+                status: row.get(6)?,
+                error: row.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn staging_clear(&self, session_id: &str) -> Result<(), IndexError> {
+        self.conn.execute(
+            "DELETE FROM import_staging WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    /// 按 import_source 找既有相册（§8.3 幂等建相册）。
+    pub fn album_by_import_source(
+        &self,
+        import_source: &str,
+    ) -> Result<Option<Versioned<AlbumRecord>>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,name,parent_id,sort_order,import_source,local_only,created_at,deleted_at,sync_lamport,sync_device
+             FROM albums WHERE import_source = ?1 LIMIT 1",
+        )?;
+        let row = stmt
+            .query_row(params![import_source], |row| {
+                Ok(Versioned {
+                    lamport: row.get::<_, i64>(8)?.max(0) as u64,
+                    device_id: row.get(9)?,
+                    record: AlbumRecord {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        parent_id: row.get(2)?,
+                        sort_order: row.get(3)?,
+                        import_source: row.get(4)?,
+                        local_only: row.get::<_, i64>(5)? != 0,
+                        created_at: row.get(6)?,
+                        deleted_at: row.get(7)?,
+                    },
+                })
+            })
+            .optional()?;
+        Ok(row)
+    }
+}
+
+/// import_staging 行（含新增的 error 列——schema 超集，见模块注释）。
+#[derive(Debug, Clone)]
+pub struct StagingRow {
+    pub id: i64,
+    pub abs_path: String,
+    pub rel_path: String,
+    pub size: i64,
+    pub mtime: i64,
+    pub sha256: String,
+    pub status: String,
+    pub error: String,
 }
 
 use std::path::Path;

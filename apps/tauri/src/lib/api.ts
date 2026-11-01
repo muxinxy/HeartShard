@@ -59,6 +59,55 @@ export interface RebalanceReport {
   failed: string[];
 }
 
+export interface DirScanResult {
+  session_id: string;
+  files_scanned: number;
+  total_bytes: number;
+  dirs: string[];
+  truncated: string[];
+  symlinks: string[];
+}
+
+export interface PreviewAlbum {
+  rel_path: string;
+  file_count: number;
+  bytes: number;
+}
+
+export interface ImportPreview {
+  session_id: string;
+  albums: PreviewAlbum[];
+  total_files: number;
+  total_bytes: number;
+  already_in_index: number;
+  truncated: string[];
+  symlinks: string[];
+}
+
+export interface ImportRunReport {
+  session_id: string;
+  albums_created: number;
+  albums_reused: number;
+  imported: number;
+  skipped_duplicate: number;
+  failed: string[];
+  paused: boolean;
+  truncated: string[];
+  symlinks: string[];
+}
+
+export interface ImportProgress {
+  session_id: string;
+  stage: string;
+  album_name: string | null;
+  album_index: number;
+  album_total: number;
+  files_done: number;
+  files_total: number;
+  bytes_done: number;
+  bytes_total: number;
+}
+
 export const api = {
   sessionStatus: () => invoke<SessionStatus>("session_status"),
   unlock: (password: string) => invoke<SessionStatus>("unlock", { password }),
@@ -75,6 +124,15 @@ export const api = {
   serviceStart: () => invoke<void>("service_start"),
   serviceStop: () => invoke<void>("service_stop"),
   rebalanceAll: () => invoke<RebalanceReport>("rebalance_all"),
+  importScanDir: (dir: string, createEmptyAlbums: boolean) =>
+    invoke<DirScanResult>("import_scan_dir", { dir, createEmptyAlbums }),
+  importPreview: (sessionId: string) => invoke<ImportPreview>("import_preview", { sessionId }),
+  importExecute: (sessionId: string) => invoke<ImportRunReport>("import_execute", { sessionId }),
+  importCancel: () => invoke<void>("import_cancel"),
+  pickDirectory: async (): Promise<string | null> => {
+    const picked = await open({ directory: true, title: "选择要导入的目录" });
+    return typeof picked === "string" ? picked : null;
+  },
 
   pickFiles: async (): Promise<string[]> => {
     const picked = await open({

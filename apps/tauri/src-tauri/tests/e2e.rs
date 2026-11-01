@@ -1,9 +1,7 @@
-//! M2 退出标准 E2E：
-//! 1. 单设备：导入 → 双 Storage 分片/manifest 冗余 → 体检 → 去重 → 还原 → SHA256；
-//! 2. 双设备共享云端模拟：时间线一致 + Lamport 裁决（相册冲突在 core-rs 单测覆盖）；
-//! 3. 错口令在 unlock 即失败（SQLCipher）。
+//! E2E：M2 退出标准 + §12.2 目录导入场景（增量幂等 / 5000 文件 / 断网续传）。
 
-use tauri_lib::library::{HeartCore, ImportStatus, LibError};
+use std::sync::atomic::AtomicBool;
+use tauri_lib::library::{HeartCore, ImportOptions, ImportStatus, LibError};
 
 /// xorshift64 确定性伪随机（测试专用）。
 struct XorShift(u64);
@@ -276,3 +274,141 @@ fn wrong_password_fails_at_unlock() {
     core.unlock("right-password").unwrap();
     assert_eq!(core.list_blobs().unwrap().len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// §12.2 目录导入 E2E：五阶段向导（扫描→预览→幂等建相册→上传→报告）
+// ---------------------------------------------------------------------------
+
+fn write_file(dir: &std::path::Path, rel: &str, data: &[u8]) {
+    let p = dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, data).unwrap();
+}
+
+/// §12.2：同一目录两次导入——第二次加新照片 → 增量上传 + 相册幂等复用（§8.3/§8.4）。
+#[test]
+fn directory_import_two_runs_incremental_and_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = HeartCore::new(dir.path());
+    core.unlock("dir-import").unwrap();
+
+    let src_root = tempfile::tempdir().unwrap();
+    write_file(src_root.path(), "beach.jpg", &random_bytes(0x11, 300_000));
+    write_file(src_root.path(), "sub/mountain.png", &random_bytes(0x22, 200_000));
+    write_file(src_root.path(), "sub/forest.jpg", &random_bytes(0x33, 100_000));
+
+    // 第一次导入（3 文件，2 相册：根 + sub）
+    let scan = core.import_scan_dir(src_root.path(), true).unwrap();
+    assert_eq!(scan.files_scanned, 3);
+    assert!(scan.dirs.contains(&"sub".to_string()));
+    let rep1 = core
+        .import_execute(&scan.session_id, ImportOptions::default(), &AtomicBool::new(false), &|_| {})
+        .unwrap();
+    assert_eq!(rep1.imported, 3);
+    assert_eq!(rep1.albums_created, 2, "root + sub");
+    assert!(!rep1.paused);
+
+    // 第二次导入（无新增）：0 上传 + 全去重 + 相册按 import_source 复用
+    let scan2 = core.import_scan_dir(src_root.path(), true).unwrap();
+    let rep2 = core
+        .import_execute(&scan2.session_id, ImportOptions::default(), &AtomicBool::new(false), &|_| {})
+        .unwrap();
+    assert_eq!(rep2.imported, 0, "no new files → no uploads");
+    assert_eq!(rep2.skipped_duplicate, 3, "all deduped via staging/index");
+    assert_eq!(rep2.albums_created, 0);
+    assert_eq!(rep2.albums_reused, 2, "albums reused by import_source");
+
+    // 第三次导入：目录里加 2 张新照片 → 只上传增量
+    write_file(src_root.path(), "sub/sunset.jpg", &random_bytes(0x44, 150_000));
+    write_file(src_root.path(), "city.jpg", &random_bytes(0x55, 250_000));
+    let scan3 = core.import_scan_dir(src_root.path(), true).unwrap();
+    assert_eq!(scan3.files_scanned, 5);
+    let rep3 = core
+        .import_execute(&scan3.session_id, ImportOptions::default(), &AtomicBool::new(false), &|_| {})
+        .unwrap();
+    assert_eq!(rep3.imported, 2, "only the 2 new photos upload");
+    assert_eq!(rep3.skipped_duplicate, 3, "existing 3 deduped");
+    assert_eq!(rep3.albums_created, 0, "albums reused (incremental)");
+    assert_eq!(rep3.albums_reused, 2);
+
+    // 全部 5 个 blob 在时间线里
+    assert_eq!(core.list_blobs().unwrap().len(), 5);
+}
+
+/// §12.2：5000+ 文件目录——分批处理不 OOM，全部入库。
+#[test]
+fn directory_import_5000_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = HeartCore::new(dir.path());
+    core.unlock("bulk-import").unwrap();
+
+    let src = tempfile::tempdir().unwrap();
+    for i in 0..5000u32 {
+        // 内容各异：避免 AV 将批量同内容文件隔离（真实照片本来互不相同）
+        let mut payload = vec![0xA5u8; 128];
+        payload[0..4].copy_from_slice(&i.to_be_bytes());
+        write_file(src.path(), &format!("batch/{i:05}.bin"), &payload);
+    }
+
+    let scan = core.import_scan_dir(src.path(), false).unwrap();
+    assert_eq!(scan.files_scanned, 5000);
+    let rep = core
+        .import_execute(&scan.session_id, ImportOptions::default(), &AtomicBool::new(false), &|_| {})
+        .unwrap();
+    assert_eq!(rep.imported, 5000, "failures: {:?}", rep.failed);
+    assert!(!rep.paused);
+    assert_eq!(core.list_blobs().unwrap().len(), 5000);
+}
+
+/// §12.2：导入中断网——存储失联触发连续失败 5 个暂停；恢复后续传完成。
+#[test]
+fn directory_import_resume_after_outage() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = HeartCore::new(dir.path());
+    core.unlock("offline-import").unwrap();
+
+    let src = tempfile::tempdir().unwrap();
+    for i in 0..8u32 {
+        // 种子取奇数且互不相同（xorshift 内部 seed|1 会吞掉偶数最低位）
+        write_file(
+            src.path(),
+            &format!("photo/{i:02}.jpg"),
+            &random_bytes(0x101 + u64::from(i) * 2, 64_000),
+        );
+    }
+    let scan = core.import_scan_dir(src.path(), false).unwrap();
+
+    // "断网"：移除默认 Storage，注册一个不可达的盘符（put 全部失败；
+    // LocalDirStore 会自愈重建目录，改名模拟不了真实断网）。
+    core.remove_storage("local-a").unwrap();
+    core.remove_storage("local-b").unwrap();
+    core.add_storage_local("offline", "Q:\\heartshard-offline-test").unwrap();
+
+    let rep1 = core
+        .import_execute(&scan.session_id, ImportOptions::default(), &AtomicBool::new(false), &|_| {})
+        .unwrap();
+    assert!(rep1.paused, "5 consecutive failures must pause: {}", rep1.failed.len());
+    assert_eq!(rep1.imported, 0);
+    assert_eq!(rep1.failed.len(), 5, "paused after 5 consecutive failures");
+
+    // "恢复网络"：换回可用 Storage
+    core.remove_storage("offline").unwrap();
+    core.add_storage_local("local-c", dir.path().join("storages").join("local-c"))
+        .unwrap();
+
+    // 续传：staging 里 failed/pending 全部重试 → 完成
+    let rep2 = core
+        .import_execute(&scan.session_id, ImportOptions::default(), &AtomicBool::new(false), &|_| {})
+        .unwrap();
+    assert_eq!(rep2.imported, 8, "resume completes all 8: {:?}", rep2.failed);
+    assert!(!rep2.paused);
+
+    // 数据完好：全部可还原
+    let blobs = core.list_blobs().unwrap();
+    assert_eq!(blobs.len(), 8);
+    for b in &blobs {
+        let out = dir.path().join("restored").join(&b.file_name);
+        core.export_blob(&b.blob_hash, &out).unwrap();
+    }
+}
+

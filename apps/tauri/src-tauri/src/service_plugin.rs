@@ -18,16 +18,18 @@ pub struct HeartshardService<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 #[cfg(mobile)]
 impl<R: Runtime> HeartshardService<R> {
-    pub fn start(&self) -> tauri::Result<()> {
+    pub fn start(&self) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<serde_json::Value>("startService", serde_json::Value::Null)
             .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
-    pub fn stop(&self) -> tauri::Result<()> {
+    pub fn stop(&self) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<serde_json::Value>("stopService", serde_json::Value::Null)
             .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -51,13 +53,13 @@ pub struct MobileService {
 }
 
 #[cfg(mobile)]
-pub(crate) struct MobileServiceInner(HeartshardService<tauri::Wry>);
+pub(crate) struct MobileServiceInner(pub(crate) HeartshardService<tauri::Wry>);
 
 #[cfg(desktop)]
 pub(crate) struct MobileServiceInner;
 
 impl MobileService {
-    pub fn start(&self) -> tauri::Result<()> {
+    pub fn start(&self) -> Result<(), String> {
         #[cfg(mobile)]
         {
             if let Some(inner) = &self.inner {
@@ -67,7 +69,7 @@ impl MobileService {
         Ok(())
     }
 
-    pub fn stop(&self) -> tauri::Result<()> {
+    pub fn stop(&self) -> Result<(), String> {
         #[cfg(mobile)]
         {
             if let Some(inner) = &self.inner {

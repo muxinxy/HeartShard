@@ -1,10 +1,12 @@
 //! Tauri 命令层：把 `library.rs` 的业务函数暴露给前端。
 //! 错误统一转 String（M1）；会话状态在 `SessionState`（Mutex 持 HeartCore）。
 
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::library::{
     BlobEntry, HeartCore, ImportOutcome, LibError, RebalanceReport, RepairReport, StorageStatus,
@@ -113,6 +115,59 @@ pub fn repair_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<
 #[tauri::command]
 pub fn rebalance_all(state: State<'_, SessionState>) -> Result<RebalanceReport, String> {
     state.core.lock().unwrap().rebalance_all().map_err(err_str)
+}
+
+// ---------------- 目录导入五阶段向导（§8.5） ----------------
+
+/// 全局取消标志（一次一个导入会话）。
+pub struct ImportCancel(pub AtomicBool);
+
+#[tauri::command]
+pub fn import_scan_dir(
+    dir: String,
+    create_empty_albums: bool,
+    state: State<'_, SessionState>,
+) -> Result<crate::library::DirScanResult, String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .import_scan_dir(Path::new(&dir), create_empty_albums)
+        .map_err(err_str)
+}
+
+#[tauri::command]
+pub fn import_preview(
+    session_id: String,
+    state: State<'_, SessionState>,
+) -> Result<crate::library::ImportPreview, String> {
+    state.core.lock().unwrap().import_preview(&session_id).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn import_execute(
+    app: tauri::AppHandle,
+    session_id: String,
+    state: State<'_, SessionState>,
+    cancel: State<'_, ImportCancel>,
+) -> Result<crate::library::ImportRunReport, String> {
+    cancel.0.store(false, Ordering::Relaxed);
+    let core = state.core.lock().unwrap();
+    let result = core.import_execute(
+        &session_id,
+        crate::library::ImportOptions::default(),
+        &cancel.0,
+        &|progress| {
+            // 两级进度经 Tauri event 推送（§8.5）
+            let _ = app.emit("import-progress", &progress);
+        },
+    );
+    result.map_err(err_str)
+}
+
+#[tauri::command]
+pub fn import_cancel(cancel: State<'_, ImportCancel>) {
+    cancel.0.store(true, Ordering::Relaxed);
 }
 
 #[tauri::command]

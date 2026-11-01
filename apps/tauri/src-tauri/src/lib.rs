@@ -40,6 +40,7 @@ pub fn run() {
             let data_dir =
                 commands::resolve_data_dir(app.handle()).expect("cannot resolve app data dir");
             app.manage(commands::SessionState::new(data_dir));
+            app.manage(commands::ImportCancel(std::sync::atomic::AtomicBool::new(false)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -56,6 +57,10 @@ pub fn run() {
             commands::storage_status,
             commands::service_start,
             commands::service_stop,
+            commands::import_scan_dir,
+            commands::import_preview,
+            commands::import_execute,
+            commands::import_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
