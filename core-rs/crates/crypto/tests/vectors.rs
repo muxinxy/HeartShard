@@ -214,6 +214,11 @@ fn heartshard_kdf_cross_validated() {
         k["config_key_hex"].as_str().unwrap(),
         "config_key"
     );
+    assert_eq!(
+        hex::encode(keys.index_key.as_ref()),
+        k["index_key_hex"].as_str().unwrap(),
+        "index_key (SQLCipher)"
+    );
     let blob_hash: [u8; 32] = hex::decode(k["blob_hash_hex"].as_str().unwrap())
         .unwrap()
         .try_into()

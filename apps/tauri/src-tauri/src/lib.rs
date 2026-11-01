@@ -2,6 +2,9 @@
 
 mod commands;
 pub mod library;
+pub mod storage_ftp;
+pub mod storage_s3;
+pub mod storage_webdav;
 
 use tauri::Manager;
 
@@ -25,6 +28,9 @@ pub fn run() {
             commands::list_blobs,
             commands::export_blob,
             commands::verify_blob,
+            commands::sync_now,
+            commands::repair_blob,
+            commands::storage_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

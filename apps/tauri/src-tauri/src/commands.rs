@@ -6,7 +6,10 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{Manager, State};
 
-use crate::library::{BlobEntry, HeartCore, ImportOutcome, LibError, VerifyReport};
+use crate::library::{
+    BlobEntry, HeartCore, ImportOutcome, LibError, RepairReport, StorageStatus, SyncOutcome,
+    VerifyReport,
+};
 
 /// 全局会话：进程内唯一 HeartCore。
 pub struct SessionState {
@@ -82,6 +85,21 @@ pub fn export_blob(
 #[tauri::command]
 pub fn verify_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<VerifyReport, String> {
     state.core.lock().unwrap().verify_blob(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn sync_now(state: State<'_, SessionState>) -> Result<SyncOutcome, String> {
+    state.core.lock().unwrap().sync_now().map_err(err_str)
+}
+
+#[tauri::command]
+pub fn repair_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<RepairReport, String> {
+    state.core.lock().unwrap().repair_blob(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn storage_status(state: State<'_, SessionState>) -> Result<Vec<StorageStatus>, String> {
+    state.core.lock().unwrap().storage_status().map_err(err_str)
 }
 
 /// 构造生产环境的数据目录（app data dir）。

@@ -41,6 +41,8 @@ manifest_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=master_salt,
                     info=b"heartshard/manifest/v1").derive(mk)
 config_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=master_salt,
                   info=b"heartshard/config/v1").derive(mk)
+index_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=master_salt,
+                 info=b"heartshard/index/v1").derive(mk)
 
 blob_hash = hashlib.sha256(b"HeartShard M0 blob").digest()  # raw 32B
 blob_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=master_salt,
@@ -66,6 +68,7 @@ out = {
         "master_key_hex": mk.hex(),
         "manifest_key_hex": manifest_key.hex(),
         "config_key_hex": config_key.hex(),
+        "index_key_hex": index_key.hex(),
         "blob_hash_hex": blob_hash.hex(),
         "blob_key_hex": blob_key.hex(),
         "blob_info": "HKDF-Expand(prk, info='heartshard/blob/v1' || blob_hash_raw32)"

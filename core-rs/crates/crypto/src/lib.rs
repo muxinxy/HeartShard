@@ -206,6 +206,7 @@ pub fn derive_master_key(
 const HKDF_LABEL_MANIFEST: &[u8] = b"heartshard/manifest/v1";
 const HKDF_LABEL_CONFIG: &[u8] = b"heartshard/config/v1";
 const HKDF_LABEL_BLOB: &[u8] = b"heartshard/blob/v1";
+const HKDF_LABEL_INDEX: &[u8] = b"heartshard/index/v1";
 
 /// 从 MK 派生的会话子密钥集合。持会话生命周期，Drop 后密文零化
 /// （`Hkdf` 内部 prk 不做零化——MK 本就在会话内存中，见 docs/mixfile-study.md §5 Q2 注）。
@@ -216,6 +217,8 @@ pub struct DerivedKeys {
     master_salt: Vec<u8>,
     pub manifest_key: Zeroizing<[u8; 32]>,
     pub config_key: Zeroizing<[u8; 32]>,
+    /// SQLCipher index.db 密钥（HKDF，§7.1）。
+    pub index_key: Zeroizing<[u8; 32]>,
 }
 
 impl DerivedKeys {
@@ -224,6 +227,7 @@ impl DerivedKeys {
         let keys = Self {
             manifest_key: Zeroizing::new(expand(&master_key, master_salt, HKDF_LABEL_MANIFEST)?),
             config_key: Zeroizing::new(expand(&master_key, master_salt, HKDF_LABEL_CONFIG)?),
+            index_key: Zeroizing::new(expand(&master_key, master_salt, HKDF_LABEL_INDEX)?),
             master_key,
             master_salt: master_salt.to_vec(),
         };

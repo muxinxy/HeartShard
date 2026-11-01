@@ -1,12 +1,13 @@
-//! HeartShard M1 业务库：会话密钥、本地目录模拟 Storage、加密 manifest/索引、
-//! 导入/导出/校验。与 Tauri 类型解耦，可直接被集成测试调用。
+//! HeartShard 业务库（M2）：会话密钥、SQLCipher 索引、多 Storage（模拟/S3）、
+//! 加密 manifest（冗余 ≥2 Storage）、导入/导出/校验、双设备同步。
+//! 与 Tauri 类型解耦，可直接被集成测试调用。
 //!
-//! M1 范围（简报）：上传 → 分片到本地目录（模拟 Storage）→ 下载还原 → SHA256 校验。
-//! M2 起引入 SQLCipher index.db 与真实 S3/WebDAV 适配器，替换本文件中的
-//! 加密 JSON 索引与本地目录 Storage。
+//! M1 → M2 变更：本地 JSON 索引 → SQLCipher index.db（core-rs/crates/index）；
+//! 单 Storage → 多 Storage 注册表（shard 按 shard_index 分散、manifest 冗余全量写入）；
+//! 新增 sync_now（Lamport 全量发布 + 拉取合并）。
+//! 已知限制：M1 的 index.m1.json.enc 不做迁移（M1 未发布给用户）。
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,16 +16,20 @@ use crypto::{
     KdfParams,
 };
 use ida::CODEC_ID;
+use index::models::{BlobRecord, Versioned};
+use index::sqlite::IndexDb;
+use index::store::BlobStore;
+use index::sync;
 use keypath::manifest_object_key;
 use serde::{Deserialize, Serialize};
 use shard::{encode_blob, ChunkManifestInfo};
 use thiserror::Error;
 
+use crate::storage_s3::{S3Config, S3Store};
+
 pub const DEFAULT_CHUNK_SIZE: usize = shard::DEFAULT_CHUNK_SIZE; // 1 MiB
 pub const DEFAULT_N: u8 = shard::DEFAULT_N; // 4
 pub const DEFAULT_M: u8 = shard::DEFAULT_M; // 2
-/// M1 唯一的模拟 Storage id。
-pub const MOCK_STORAGE_ID: &str = "local-mock";
 
 #[derive(Debug, Error)]
 pub enum LibError {
@@ -34,8 +39,14 @@ pub enum LibError {
     Crypto(#[from] CryptoError),
     #[error("shard: {0}")]
     Shard(#[from] shard::ShardError),
+    #[error("ida: {0}")]
+    Ida(#[from] ida::IdaError),
     #[error("keypath: {0}")]
     Keypath(#[from] keypath::KeypathError),
+    #[error("index: {0}")]
+    Index(#[from] index::IndexError),
+    #[error("store: {0}")]
+    Store(#[from] index::store::StoreError),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
     #[error("session is locked; unlock first")]
@@ -48,22 +59,22 @@ pub enum LibError {
     Data(String),
 }
 
-/// 会话期持有派生密钥；Drop 时零化（MK 本体在 `DerivedKeys` 内）。
+/// 会话期持有派生密钥与打开的加密索引；Drop 时零化。
 pub struct HeartCore {
     data_dir: PathBuf,
     keys: Option<DerivedKeys>,
+    db: Option<IndexDb>,
+    storages: Vec<StorageConfig>,
 }
 
-/// 时间线/列表条目（解密后的本地索引内容）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 时间线/列表条目。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlobEntry {
     pub blob_hash: String,
     pub file_name: String,
     pub mime: String,
-    pub total_len: u64,
-    /// 文件拍摄/修改时间（unix 秒）；EXIF 提取在 M1.5 引入。
+    pub total_len: i64,
     pub taken_at: i64,
-    pub imported_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,9 +102,70 @@ pub struct VerifyReport {
     pub shard_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct StorageStatus {
+    pub id: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncOutcome {
+    pub published_lamport: u64,
+    pub pulled_objects: usize,
+    pub applied_objects: usize,
+    pub skipped: Vec<String>,
+    pub stores_ok: Vec<String>,
+    pub stores_failed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RepairReport {
+    pub blob_hash: String,
+    pub repaired: Vec<String>,
+    pub unrecoverable: Vec<u32>,
+    pub shard_count: usize,
+}
+
 // ---------------------------------------------------------------------------
-// 磁盘上的固定格式
+// Storage 注册表
 // ---------------------------------------------------------------------------
+
+/// 多 Storage 配置。S3 凭据经 CONFIG_KEY 加密后落盘（§7.1 config_encrypted 语义）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StorageConfig {
+    LocalDir { id: String, root: String },
+    S3(S3Config),
+}
+
+impl StorageConfig {
+    pub fn id(&self) -> String {
+        match self {
+            StorageConfig::LocalDir { id, .. } => id.clone(),
+            StorageConfig::S3(c) => c.bucket.clone(),
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            StorageConfig::LocalDir { .. } => "local-dir",
+            StorageConfig::S3(_) => "s3",
+        }
+    }
+
+    pub fn store(&self) -> Result<Box<dyn BlobStore>, LibError> {
+        match self {
+            StorageConfig::LocalDir { id, root } => {
+                Ok(Box::new(index::store::LocalDirStore::new(root.clone(), id.clone())))
+            }
+            StorageConfig::S3(c) => Ok(Box::new(S3Store::new(c.clone())?)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StorageRegistry {
+    storages: Vec<StorageConfig>,
+}
 
 /// KDF 参数文件（非机密：盐与参数可落盘；口令与 MK 不落盘）。
 #[derive(Debug, Serialize, Deserialize)]
@@ -104,7 +176,7 @@ struct KdfParamsFile {
     parallelism: u32,
 }
 
-/// M1 加密 manifest（M2 起迁移到 core-rs/crates/manifest 的 serde 结构）。
+/// M2 加密 manifest（冗余写入每个启用的 Storage；M3 迁移到 manifest crate）。
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     version: u32,
@@ -137,52 +209,48 @@ struct ManifestShard {
     sha256: String,
 }
 
-/// M1 本地索引（MANIFEST_KEY 加密的 JSON；M2 换 SQLCipher index.db）。
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct LocalIndex {
-    blobs: Vec<BlobEntry>,
-}
-
 impl HeartCore {
-    /// `data_dir`：生产环境为 app data 目录，测试传临时目录。
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
-        Self { data_dir: data_dir.into(), keys: None }
+        Self { data_dir: data_dir.into(), keys: None, db: None, storages: Vec::new() }
     }
 
     fn kdf_params_path(&self) -> PathBuf {
         self.data_dir.join("kdf.params.json")
     }
 
-    fn index_path(&self) -> PathBuf {
-        self.data_dir.join("index.m1.json.enc")
+    fn index_db_path(&self) -> PathBuf {
+        self.data_dir.join("index.db")
     }
 
-    /// 模拟 Storage 根目录：`{data_dir}/storages/{storage_id}/{object_key}`。
-    fn storage_root(&self, storage_id: &str) -> PathBuf {
-        self.data_dir.join("storages").join(storage_id)
+    fn registry_path(&self) -> PathBuf {
+        self.data_dir.join("storages.registry.enc")
     }
 
     fn keys_or_err(&self) -> Result<&DerivedKeys, LibError> {
         self.keys.as_ref().ok_or(LibError::Locked)
     }
 
+    fn db_or_err(&self) -> Result<&IndexDb, LibError> {
+        self.db.as_ref().ok_or(LibError::Locked)
+    }
+
     // -----------------------------------------------------------------------
     // 会话
     // -----------------------------------------------------------------------
 
-    /// 解锁：首次调用生成 KDF 参数（随机盐），派生 MK 与子密钥，载入索引。
-    /// 口令与 MK 不落盘。
     pub fn unlock(&mut self, password: &str) -> Result<(), LibError> {
-        let params_file = if self.kdf_params_path().exists() {
+        // 成本参数（m/t/p）可落盘调节；盐不落盘——从口令确定性派生：
+        // ① 新设备仅凭口令即可解密远端索引（简报 §7.3）；
+        // ② 每口令唯一盐，杜绝跨用户预计算彩虹表；
+        // ③ 离线爆破成本仍由 Argon2id 参数承担。
+        let params_file: KdfParamsFile = if self.kdf_params_path().exists() {
             let raw = fs::read(self.kdf_params_path())?;
             serde_json::from_slice::<KdfParamsFile>(&raw)
                 .map_err(|e| LibError::Data(format!("kdf params corrupt: {e}")))?
         } else {
-            let mut salt = [0u8; 16];
-            getrandom::getrandom(&mut salt).map_err(|e| LibError::Data(format!("rng: {e}")))?;
             let p = KdfParams::standard();
             let f = KdfParamsFile {
-                salt_hex: hex::encode(salt),
+                salt_hex: String::new(),
                 m_cost_kib: p.m_cost_kib,
                 t_cost: p.t_cost,
                 parallelism: p.parallelism,
@@ -191,20 +259,62 @@ impl HeartCore {
             fs::write(self.kdf_params_path(), serde_json::to_vec_pretty(&f)?)?;
             f
         };
-        let salt = hex::decode(&params_file.salt_hex)
-            .map_err(|e| LibError::Data(format!("kdf salt corrupt: {e}")))?;
         let params = KdfParams {
             m_cost_kib: params_file.m_cost_kib,
             t_cost: params_file.t_cost,
             parallelism: params_file.parallelism,
         };
-        let mk = derive_master_key(password.as_bytes(), &salt, &params)?;
-        let master_salt = format!("heartshard-master-salt-v1:{}", params_file.salt_hex);
-        self.keys = Some(DerivedKeys::new(mk, master_salt.as_bytes())?);
+        let salt_full = crypto::sha256(format!("heartshard/argon2-salt/v1:{}", password).as_bytes());
+        let mk = derive_master_key(password.as_bytes(), &salt_full[..16], &params)?;
+        let master_salt = format!("heartshard-master-salt-v1:{}", hex::encode(salt_full));
+        let keys = DerivedKeys::new(mk, master_salt.as_bytes())?;
+        self.keys = Some(keys.clone());
+
+        // 打开 SQLCipher 索引（错口令在此处即失败：file is not a database）
+        let index_key_hex = hex::encode(keys.index_key.as_ref());
+        let db = match IndexDb::open(self.index_db_path(), &index_key_hex) {
+            Ok(db) => db,
+            Err(index::IndexError::Sqlite(e)) if e.to_string().contains("not a database") => {
+                self.keys = None;
+                return Err(LibError::Data(
+                    "wrong password (index decryption failed)".into(),
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        db.init_schema()?;
+
+        // 设备 id：首次生成（16B hex）
+        if db.device_id().is_err() {
+            let mut did = [0u8; 16];
+            getrandom::getrandom(&mut did).map_err(|e| LibError::Data(format!("rng: {e}")))?;
+            db.set_device_id(&hex::encode(did))?;
+        }
+
+        // Storage 注册表：首次创建默认双本地 Storage（manifest 冗余 ≥2，§6.4）
+        self.storages = self.load_registry(&keys)?;
+        if self.storages.is_empty() {
+            self.storages = vec![
+                StorageConfig::LocalDir {
+                    id: "local-a".into(),
+                    root: self.data_dir.join("storages").join("local-a").to_string_lossy().to_string(),
+                },
+                StorageConfig::LocalDir {
+                    id: "local-b".into(),
+                    root: self.data_dir.join("storages").join("local-b").to_string_lossy().to_string(),
+                },
+            ];
+            self.save_registry(&keys)?;
+        }
+
+        self.db = Some(db);
         Ok(())
     }
 
     pub fn lock(&mut self) {
+        // 先关 DB 再清密钥
+        self.db = None;
+        self.storages.clear();
         self.keys = None; // Zeroizing Drop 清零
     }
 
@@ -212,75 +322,50 @@ impl HeartCore {
         self.keys.is_some()
     }
 
-    // -----------------------------------------------------------------------
-    // 索引（M1：加密 JSON）
-    // -----------------------------------------------------------------------
-
-    fn load_index(&self) -> Result<LocalIndex, LibError> {
-        let keys = self.keys_or_err()?;
-        if !self.index_path().exists() {
-            return Ok(LocalIndex::default());
+    fn load_registry(&self, keys: &DerivedKeys) -> Result<Vec<StorageConfig>, LibError> {
+        if !self.registry_path().exists() {
+            return Ok(Vec::new());
         }
-        let enc = fs::read(self.index_path())?;
-        let json = decrypt_bare(keys.manifest_key.as_ref(), &enc)
-            .map_err(|_| LibError::Data("local index decrypt failed (wrong password?)".into()))?;
-        serde_json::from_slice(&json)
-            .map_err(|e| LibError::Data(format!("local index corrupt: {e}")))
+        let enc = fs::read(self.registry_path())?;
+        let json = decrypt_bare(keys.config_key.as_ref(), &enc)
+            .map_err(|_| LibError::Data("storage registry decrypt failed".into()))?;
+        let reg: StorageRegistry = serde_json::from_slice(&json)
+            .map_err(|e| LibError::Data(format!("storage registry corrupt: {e}")))?;
+        Ok(reg.storages)
     }
 
-    fn save_index(&self, index: &LocalIndex) -> Result<(), LibError> {
-        let keys = self.keys_or_err()?;
-        if let Some(parent) = self.index_path().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let json = serde_json::to_vec(index)?;
+    fn save_registry(&self, keys: &DerivedKeys) -> Result<(), LibError> {
+        let reg = StorageRegistry { storages: self.storages.clone() };
+        let json = serde_json::to_vec(&reg)?;
         let iv = generate_iv()?;
-        let enc = encrypt_bare(keys.manifest_key.as_ref(), &iv, &json)?;
-        // 原子写：临时文件 + rename
-        let tmp = self.index_path().with_extension("tmp");
+        let enc = encrypt_bare(keys.config_key.as_ref(), &iv, &json)?;
+        let tmp = self.registry_path().with_extension("tmp");
         fs::write(&tmp, &enc)?;
-        fs::rename(&tmp, self.index_path())?;
+        fs::rename(&tmp, self.registry_path())?;
         Ok(())
     }
 
     // -----------------------------------------------------------------------
-    // 模拟 Storage（M2 换成 BlobStore trait + S3/WebDAV 适配器）
+    // Storage 辅助
     // -----------------------------------------------------------------------
 
-    fn storage_put(&self, storage_id: &str, remote_key: &str, data: &[u8]) -> Result<(), LibError> {
-        let path = self.remote_path(storage_id, remote_key)?;
-        fs::create_dir_all(path.parent().ok_or_else(|| LibError::Data("bad key".into()))?)?;
-        let tmp = path.with_extension("part");
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(data)?;
-        f.sync_all()?;
-        fs::rename(&tmp, &path)?;
-        Ok(())
+    fn store_by_id(&self, id: &str) -> Result<Box<dyn BlobStore>, LibError> {
+        let cfg = self
+            .storages
+            .iter()
+            .find(|s| s.id() == id)
+            .ok_or_else(|| LibError::Data(format!("storage {id} not registered")))?;
+        cfg.store()
     }
 
-    fn storage_get(&self, storage_id: &str, remote_key: &str) -> Option<Vec<u8>> {
-        let path = self.remote_path(storage_id, remote_key).ok()?;
-        fs::read(path).ok()
-    }
-
-    fn remote_path(&self, storage_id: &str, remote_key: &str) -> Result<PathBuf, LibError> {
-        let root = self.storage_root(storage_id);
-        let mut p = root;
-        for seg in remote_key.split('/') {
-            if seg.is_empty() || seg == "." || seg == ".." {
-                return Err(LibError::Data(format!("illegal remote key: {remote_key}")));
-            }
-            p.push(seg);
-        }
-        Ok(p)
+    fn all_stores(&self) -> Result<Vec<Box<dyn BlobStore>>, LibError> {
+        self.storages.iter().map(|s| s.store()).collect()
     }
 
     // -----------------------------------------------------------------------
-    // 导入 / 列表 / 导出 / 校验
+    // 导入 / 列表 / 导出 / 校验 / 同步
     // -----------------------------------------------------------------------
 
-    /// 导入单个文件：SHA-256 去重（§8.4）→ encode_blob → shard 落盘 →
-    /// 加密 manifest 落盘 → 写索引。M1 整文件读入内存（大文件流式在 M1.5）。
     pub fn import_file(&mut self, path: impl AsRef<Path>) -> Result<ImportOutcome, LibError> {
         let path = path.as_ref();
         let display = path.to_string_lossy().to_string();
@@ -303,6 +388,7 @@ impl HeartCore {
 
     fn import_inner(&mut self, path: &Path) -> Result<(String, bool), LibError> {
         let keys = self.keys_or_err()?.clone();
+        let db = self.db_or_err()?;
         let meta = fs::metadata(path)?;
         let taken_at = meta
             .modified()?
@@ -312,31 +398,43 @@ impl HeartCore {
 
         let blob = fs::read(path)?;
         let blob_sha256 = crypto::sha256(&blob);
+        let blob_hex = hex::encode(blob_sha256);
 
-        let mut index = self.load_index()?;
-        if index.blobs.iter().any(|b| b.blob_hash == hex::encode(blob_sha256)) {
-            return Ok((hex::encode(blob_sha256), true)); // 去重：只跳过上传
+        // 去重（§8.4）
+        if db.load_blobs()?.iter().any(|v| v.record.hash == blob_hex) {
+            return Ok((blob_hex, true));
         }
 
-        let blob_key = keys.blob_key(&blob_sha256)?;
-        let encoded = encode_blob(&blob, &blob_key, DEFAULT_CHUNK_SIZE, DEFAULT_N, DEFAULT_M, generate_iv)?;
-        let blob_hex = hex::encode(encoded.blob_sha256);
+        let stores = self.all_stores()?;
+        if stores.is_empty() {
+            return Err(LibError::Data("no storage configured".into()));
+        }
 
-        // shard 落盘（模拟上传到 Storage）
+        // 本地变更：Lamport 时钟 +1
+        let lamport = db.lamport()? + 1;
+        let me = db.device_id()?;
+        let blob_key = keys.blob_key(&blob_sha256)?;
+
+        let encoded = encode_blob(&blob, &blob_key, DEFAULT_CHUNK_SIZE, DEFAULT_N, DEFAULT_M, generate_iv)?;
+
+        // shard 分散：shard_index % storages.len()（同一 chunk 的 shard 必落不同 Storage，
+        // 当 Storage 数 ≥ n 时天然满足；不足时按权重轮转、不重复放同 chunk 的 shard，§2.2）
         let mut manifest_shards = Vec::with_capacity(encoded.shards.len());
         for s in &encoded.shards {
-            self.storage_put(MOCK_STORAGE_ID, &s.object_key, &s.data)?;
+            let cfg = &self.storages[usize::from(s.shard_index) % self.storages.len()];
+            let store = cfg.store()?;
+            store.put(&s.object_key, &s.data)?;
             manifest_shards.push(ManifestShard {
                 chunk_index: s.chunk_index,
                 shard_index: s.shard_index,
-                storage_id: MOCK_STORAGE_ID.to_string(),
+                storage_id: cfg.id(),
                 remote_key: s.object_key.clone(),
                 size: s.data.len() as u32,
                 sha256: hex::encode(s.sha256),
             });
         }
 
-        // 加密 manifest 落盘（§6.4：M2 起冗余 ≥2 Storage；M1 单存储单副本，见已知限制）
+        // manifest：加密后冗余写入全部 Storage（§6.4）
         let manifest = Manifest {
             version: 1,
             codec: CODEC_ID.to_string(),
@@ -362,29 +460,67 @@ impl HeartCore {
         let manifest_bytes = serde_json::to_vec(&manifest)?;
         let iv = generate_iv()?;
         let enc_manifest = encrypt_bare(keys.manifest_key.as_ref(), &iv, &manifest_bytes)?;
-        self.storage_put(MOCK_STORAGE_ID, &manifest_key_path, &enc_manifest)?;
+        for store in &stores {
+            store.put(&manifest_key_path, &enc_manifest)?;
+        }
 
-        // 写索引
-        index.blobs.push(BlobEntry {
-            blob_hash: blob_hex.clone(),
-            file_name: manifest.file_name.clone(),
-            mime: manifest.mime.clone(),
-            total_len: manifest.total_len,
-            taken_at,
-            imported_at: now_secs(),
-        });
-        self.save_index(&index)?;
+        // 写加密索引（跨设备同步的元数据）
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me,
+            record: BlobRecord {
+                hash: blob_hex.clone(),
+                file_name: manifest.file_name.clone(),
+                size: manifest.total_len as i64,
+                mime: manifest.mime.clone(),
+                width: 0,
+                height: 0,
+                taken_at,
+                chunk_size: DEFAULT_CHUNK_SIZE as i64,
+                n: DEFAULT_N as i64,
+                m: DEFAULT_M as i64,
+                manifest_storage_key: manifest_key_path.clone(),
+                created_at: manifest.created_at,
+                deleted_at: None,
+            },
+        })?;
+        db.set_lamport(lamport)?;
         Ok((blob_hex, false))
     }
 
     pub fn list_blobs(&self) -> Result<Vec<BlobEntry>, LibError> {
-        let mut index = self.load_index()?;
-        index.blobs.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
-        Ok(index.blobs)
+        let db = self.db_or_err()?;
+        let mut entries: Vec<BlobEntry> = db
+            .load_blobs()?
+            .into_iter()
+            .filter(|v| v.record.deleted_at.is_none())
+            .map(|v| BlobEntry {
+                blob_hash: v.record.hash,
+                file_name: v.record.file_name,
+                mime: v.record.mime,
+                total_len: v.record.size,
+                taken_at: v.record.taken_at,
+            })
+            .collect();
+        entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
+        Ok(entries)
     }
 
-    /// 导出还原：读加密 manifest → fetch 闭包拉 shard → RS 重组 → 解密 →
-    /// per-chunk 与 blob 级 SHA-256 校验 → 写目标文件。
+    fn load_manifest(&self, blob_hex: &str) -> Result<Manifest, LibError> {
+        let keys = self.keys_or_err()?;
+        let remote_key = manifest_object_key(blob_hex)?;
+        // 冗余副本：任一 Storage 读到即可
+        for store in self.all_stores()? {
+            if let Some(enc) = store.get(&remote_key) {
+                let json = decrypt_bare(keys.manifest_key.as_ref(), &enc)
+                    .map_err(|_| LibError::ManifestMissing(blob_hex.to_string()))?;
+                return serde_json::from_slice(&json)
+                    .map_err(|e| LibError::Data(format!("manifest corrupt: {e}")));
+            }
+        }
+        Err(LibError::ManifestMissing(blob_hex.to_string()))
+    }
+
     pub fn export_blob(&self, blob_hash: &str, dest_path: impl AsRef<Path>) -> Result<(), LibError> {
         let keys = self.keys_or_err()?.clone();
         let blob_hex = blob_hash.to_lowercase();
@@ -400,7 +536,6 @@ impl HeartCore {
         let blob_hash_bytes: [u8; 32] = decode_hash(&manifest.blob_sha256)?;
         let blob_key = keys.blob_key(&blob_hash_bytes)?;
 
-        let storage_id = manifest.shards.first().map(|s| s.storage_id.clone()).unwrap_or_default();
         let decoded = shard::decode_blob(
             &blob_hash_bytes,
             &blob_key,
@@ -408,21 +543,17 @@ impl HeartCore {
             manifest.n,
             manifest.m,
             |chunk_index, shard_index| {
-                manifest
-                    .shards
-                    .iter()
-                    .find(|s| s.chunk_index == chunk_index && s.shard_index == shard_index)
-                    .and_then(|s| self.storage_get(&storage_id, &s.remote_key))
+                let shard = manifest.shards.iter().find(|s| {
+                    s.chunk_index == chunk_index && s.shard_index == shard_index
+                })?;
+                let store = self.store_by_id(&shard.storage_id).ok()?;
+                store.get(&shard.remote_key)
             },
         )?;
 
-        // blob 级 SHA-256 校验（decode_blob 已做 per-chunk 校验）
         let final_hash = crypto::sha256(&decoded);
         if final_hash != blob_hash_bytes {
-            return Err(LibError::Data(format!(
-                "blob sha256 mismatch after decode: {}",
-                blob_hex
-            )));
+            return Err(LibError::Data(format!("blob sha256 mismatch after decode: {blob_hex}")));
         }
         if decoded.len() as u64 != manifest.total_len {
             return Err(LibError::Data("total length mismatch after decode".into()));
@@ -435,21 +566,21 @@ impl HeartCore {
         Ok(())
     }
 
-    /// 健康检查：manifest 存在 + 每个远端 shard 存在且 SHA-256 一致。
     pub fn verify_blob(&self, blob_hash: &str) -> Result<VerifyReport, LibError> {
         let blob_hex = blob_hash.to_lowercase();
         let manifest = self.load_manifest(&blob_hex)?;
         let mut missing = Vec::new();
         let mut corrupted = Vec::new();
-        let storage_id = manifest.shards.first().map(|s| s.storage_id.clone()).unwrap_or_default();
         for s in &manifest.shards {
-            match self.storage_get(&storage_id, &s.remote_key) {
-                None => missing.push(s.remote_key.clone()),
-                Some(data) => {
-                    if data.len() as u32 != s.size
-                        || hex::encode(crypto::sha256(&data)) != s.sha256
-                    {
-                        corrupted.push(s.remote_key.clone());
+            let data = self
+                .store_by_id(&s.storage_id)
+                .ok()
+                .and_then(|store| store.get(&s.remote_key));
+            match data {
+                None => missing.push(format!("[{}] {}", s.storage_id, s.remote_key)),
+                Some(bytes) => {
+                    if bytes.len() as u32 != s.size || hex::encode(crypto::sha256(&bytes)) != s.sha256 {
+                        corrupted.push(format!("[{}] {}", s.storage_id, s.remote_key));
                     }
                 }
             }
@@ -464,15 +595,145 @@ impl HeartCore {
         })
     }
 
-    fn load_manifest(&self, blob_hex: &str) -> Result<Manifest, LibError> {
+    pub fn sync_now(&self) -> Result<SyncOutcome, LibError> {
         let keys = self.keys_or_err()?;
-        let remote_key = manifest_object_key(blob_hex)?;
-        let enc = self
-            .storage_get(MOCK_STORAGE_ID, &remote_key)
-            .ok_or_else(|| LibError::ManifestMissing(blob_hex.to_string()))?;
-        let json = decrypt_bare(keys.manifest_key.as_ref(), &enc)
-            .map_err(|_| LibError::ManifestMissing(blob_hex.to_string()))?;
-        serde_json::from_slice(&json).map_err(|e| LibError::Data(format!("manifest corrupt: {e}")))
+        let db = self.db_or_err()?;
+        let stores = self.all_stores()?;
+        let report = sync::sync_now(
+            db,
+            &stores.iter().map(|b| b.as_ref()).collect::<Vec<_>>(),
+            &keys.manifest_key,
+            now_secs(),
+        )?;
+        Ok(SyncOutcome {
+            published_lamport: report.published_lamport,
+            pulled_objects: report.pulled_objects,
+            applied_objects: report.applied_objects,
+            skipped: report.skipped_objects,
+            stores_ok: report.stores_ok,
+            stores_failed: report.stores_failed,
+        })
+    }
+
+    pub fn storage_status(&self) -> Result<Vec<StorageStatus>, LibError> {
+        Ok(self
+            .storages
+            .iter()
+            .map(|s| StorageStatus { id: s.id(), kind: s.kind().to_string() })
+            .collect())
+    }
+
+    /// 注册 S3 Storage（配置即刻经 CONFIG_KEY 加密落盘；连通性用 s3-verify 验证）。
+    pub fn add_storage_s3(&mut self, config: S3Config) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let id = config.bucket.clone();
+        if self.storages.iter().any(|s| s.id() == id) {
+            return Err(LibError::Data(format!("storage {id} already registered")));
+        }
+        self.storages.push(StorageConfig::S3(config));
+        self.save_registry(&keys)?;
+        Ok(id)
+    }
+
+    /// 修复任务（M5）：对每个受损 chunk，用健康 shard RS 重组出原密文，
+    /// 重新分散并把受损 shard 位置重写（RS 编码确定性 ⇒ shard 字节与 SHA 不变）。
+    pub fn repair_blob(&self, blob_hash: &str) -> Result<RepairReport, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let blob_hex = blob_hash.to_lowercase();
+        let manifest = self.load_manifest(&blob_hex)?;
+        let config = ida::DispersalConfig::new(manifest.n, manifest.m)?;
+
+        let mut repaired = Vec::new();
+        let mut unrecoverable = Vec::new();
+
+        let chunk_infos: Vec<(u32, &ManifestChunk)> =
+            manifest.chunks.iter().enumerate().map(|(i, c)| (i as u32, c)).collect();
+        for (chunk_index, chunk) in chunk_infos {
+            // 该 chunk 的 shard 状态
+            let mut shards: Vec<(u8, Option<Vec<u8>>)> = Vec::new();
+            for s in manifest.shards.iter().filter(|s| s.chunk_index == chunk_index) {
+                let data = self
+                    .store_by_id(&s.storage_id)
+                    .ok()
+                    .and_then(|store| store.get(&s.remote_key));
+                let healthy = data
+                    .as_ref()
+                    .map(|d| d.len() as u32 == s.size && hex::encode(crypto::sha256(d)) == s.sha256)
+                    .unwrap_or(false);
+                shards.push((s.shard_index, if healthy { data } else { None }));
+            }
+            let damaged: Vec<u8> = shards
+                .iter()
+                .filter(|(_, d)| d.is_none())
+                .map(|(i, _)| *i)
+                .collect();
+            if damaged.is_empty() {
+                continue;
+            }
+            let healthy: Vec<(u8, Vec<u8>)> = shards
+                .into_iter()
+                .filter_map(|(i, d)| d.map(|d| (i, d)))
+                .collect();
+            if healthy.len() < usize::from(manifest.m) {
+                unrecoverable.push(chunk_index);
+                continue;
+            }
+            // RS 重组原密文 → 重新分散 → 重写受损位置
+            let refs: Vec<(u8, &[u8])> =
+                healthy.iter().map(|(i, d)| (*i, d.as_slice())).collect();
+            let ciphertext = ida::decode_shards(&refs, config, chunk.ciphertext_len as usize)
+                .map_err(|_| LibError::Data(format!("chunk {chunk_index} undecodable during repair")))?;
+            let parts = ida::encode_shards(&ciphertext, config)
+                .map_err(|e| LibError::Data(format!("re-encode failed: {e}")))?;
+            for shard_index in damaged {
+                let s = manifest
+                    .shards
+                    .iter()
+                    .find(|s| s.chunk_index == chunk_index && s.shard_index == shard_index)
+                    .ok_or_else(|| LibError::Data("manifest shard missing".into()))?;
+                let store = self.store_by_id(&s.storage_id)?;
+                store.put(&s.remote_key, &parts[usize::from(shard_index)])?;
+                repaired.push(format!("[{}] {}", s.storage_id, s.remote_key));
+            }
+        }
+
+        Ok(RepairReport {
+            blob_hash: blob_hex,
+            repaired,
+            unrecoverable,
+            shard_count: manifest.shards.len(),
+        })
+    }
+
+    /// 注册本地目录 Storage（M2 模拟云端 / 未来 NAS 挂载目录）。
+    pub fn add_storage_local(
+        &mut self,
+        id: &str,
+        root: impl Into<PathBuf>,
+    ) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        if self.storages.iter().any(|s| s.id() == id) {
+            return Err(LibError::Data(format!("storage {id} already registered")));
+        }
+        keypath::sanitize_key_segment(id)?;
+        self.storages.push(StorageConfig::LocalDir {
+            id: id.to_string(),
+            root: root.into().to_string_lossy().to_string(),
+        });
+        self.save_registry(&keys)?;
+        Ok(id.to_string())
+    }
+
+    /// 移除 Storage（仅解除注册，不删除云端对象）。
+    pub fn remove_storage(&mut self, id: &str) -> Result<(), LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let before = self.storages.len();
+        self.storages.retain(|s| s.id() != id);
+        if self.storages.len() == before {
+            return Err(LibError::Data(format!("storage {id} not found")));
+        }
+        self.save_registry(&keys)?;
+        Ok(())
     }
 }
 
@@ -489,7 +750,6 @@ fn file_name_of(path: &Path) -> String {
         .unwrap_or_else(|| "unnamed".into())
 }
 
-/// M1 用扩展名推断 MIME（EXIF/容器探测在 M1.5）。
 fn mime_of(path: &Path) -> String {
     let ext = path
         .extension()

@@ -120,6 +120,12 @@ body {
   letter-spacing: 0.02em;
 }
 
+.storages {
+  margin-left: 10px;
+  color: #6f7680;
+  font-size: 12px;
+}
+
 .spacer {
   flex: 1;
 }

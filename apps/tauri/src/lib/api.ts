@@ -32,6 +32,27 @@ export interface VerifyReport {
   shard_count: number;
 }
 
+export interface SyncOutcome {
+  published_lamport: number;
+  pulled_objects: number;
+  applied_objects: number;
+  skipped: string[];
+  stores_ok: string[];
+  stores_failed: string[];
+}
+
+export interface StorageStatus {
+  id: string;
+  kind: string;
+}
+
+export interface RepairReport {
+  blob_hash: string;
+  repaired: string[];
+  unrecoverable: number[];
+  shard_count: number;
+}
+
 export const api = {
   sessionStatus: () => invoke<SessionStatus>("session_status"),
   unlock: (password: string) => invoke<SessionStatus>("unlock", { password }),
@@ -42,6 +63,9 @@ export const api = {
   exportBlob: (blobHash: string, destPath: string) =>
     invoke<void>("export_blob", { blobHash, destPath }),
   verifyBlob: (blobHash: string) => invoke<VerifyReport>("verify_blob", { blobHash }),
+  syncNow: () => invoke<SyncOutcome>("sync_now"),
+  repairBlob: (blobHash: string) => invoke<RepairReport>("repair_blob", { blobHash }),
+  storageStatus: () => invoke<StorageStatus[]>("storage_status"),
 
   pickFiles: async (): Promise<string[]> => {
     const picked = await open({

@@ -1,0 +1,29 @@
+# 项目级 crates.io 镜像（rsproxy.cn）。
+# 背景：直连 index.crates.io / static.crates.io 在当前网络下间歇性 SSL reset。
+# 仅影响本仓库的 cargo 调用；如无需镜像可删除本文件。
+# 全局配置请见 https://rsproxy.cn
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "sparse+https://rsproxy.cn/index/"
+
+[http]
+# Windows schannel 吊销检查在当前网络下不可达（CRYPT_E_REVOCATION_OFFLINE）
+check-revoke = false
+
+[env]
+# SQLCipher vendored-openssl 构建：perl 来自 scoop（详见 docs/development.md §1）
+OPENSSL_NO_ASM = "1"
+OPENSSL_SRC_PERL = 'D:\Scoop\apps\perl\current\perl\bin\perl.exe'
+
+[build]
+# 全仓库共享 target：openssl/sqlcipher 只编译一次（core-rs / apps/tauri / tools 共用）
+target-dir = "target"
+
+[net]
+retry = 5
+git-fetch-with-cli = true

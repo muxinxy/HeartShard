@@ -6,6 +6,8 @@ import {
   formatDate,
   ImportOutcome,
   shortHash,
+  StorageStatus,
+  SyncOutcome,
   VerifyReport,
 } from "../lib/api";
 
@@ -17,13 +19,17 @@ interface VerifyState {
 export function Gallery({ onLock }: { onLock: () => void }) {
   const [blobs, setBlobs] = useState<BlobEntry[]>([]);
   const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [results, setResults] = useState<ImportOutcome[] | null>(null);
+  const [syncResult, setSyncResult] = useState<SyncOutcome | null>(null);
+  const [storages, setStorages] = useState<StorageStatus[]>([]);
   const [verify, setVerify] = useState<Record<string, VerifyState>>({});
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       setBlobs(await api.listBlobs());
+      setStorages(await api.storageStatus());
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -51,6 +57,20 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     }
   };
 
+  const doSync = async () => {
+    setSyncing(true);
+    setError(null);
+    setSyncResult(null);
+    try {
+      setSyncResult(await api.syncNow());
+      await refresh();
+    } catch (e) {
+      setError(`同步失败：${String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const doExport = async (blob: BlobEntry) => {
     setError(null);
     try {
@@ -70,6 +90,24 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       setVerify((prev) => ({ ...prev, [blob.blob_hash]: { report, at: Date.now() } }));
     } catch (e) {
       setError(`校验失败：${String(e)}`);
+    }
+  };
+
+  const doRepair = async (blob: BlobEntry) => {
+    setError(null);
+    try {
+      const report = await api.repairBlob(blob.blob_hash);
+      if (report.repaired.length > 0) {
+        alert(`已修复 ${report.repaired.length} 个 shard：\n${report.repaired.join("\n")}`);
+      } else if (report.unrecoverable.length > 0) {
+        alert(`chunk ${report.unrecoverable.join(", ")} 损坏过重，无法自动修复（健康 shard 不足）。`);
+      } else {
+        alert("一切正常，无需修复。");
+      }
+      const after = await api.verifyBlob(blob.blob_hash);
+      setVerify((prev) => ({ ...prev, [blob.blob_hash]: { report: after, at: Date.now() } }));
+    } catch (e) {
+      setError(`修复失败：${String(e)}`);
     }
   };
 
@@ -96,15 +134,33 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     <div className="gallery">
       <header className="toolbar">
         <span className="brand">HeartShard · 牧心相册</span>
+        <span className="storages" title={storages.map((s) => `${s.id} (${s.kind})`).join(", ")}>
+          {storages.length > 0 ? `${storages.length} 个 Storage` : ""}
+        </span>
         <span className="spacer" />
         <button onClick={doImport} disabled={importing}>
           {importing ? "导入中…" : "导入照片 / 视频"}
+        </button>
+        <button onClick={doSync} disabled={syncing}>
+          {syncing ? "同步中…" : "同步"}
         </button>
         <button onClick={refresh}>刷新</button>
         <button onClick={doLock} className="secondary">
           锁定
         </button>
       </header>
+
+      {syncResult && (
+        <div className="notice">
+          <strong>同步完成：</strong>
+          时钟 {syncResult.published_lamport} · 拉取 {syncResult.pulled_objects} · 应用{" "}
+          {syncResult.applied_objects} · 发布到{" "}
+          {syncResult.stores_ok.join(", ") || "（无）"}
+          {syncResult.stores_failed.length > 0 && (
+            <span className="error"> 失败：{syncResult.stores_failed.join("; ")}</span>
+          )}
+        </div>
+      )}
 
       {results && (
         <div className="notice">
@@ -157,6 +213,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                         </span>
                       )}
                       <button onClick={() => doVerify(b)}>体检</button>
+                      <button onClick={() => doRepair(b)}>修复</button>
                       <button onClick={() => doExport(b)}>导出</button>
                     </div>
                   </li>
