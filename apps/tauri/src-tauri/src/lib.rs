@@ -61,6 +61,11 @@ pub fn run() {
             commands::import_preview,
             commands::import_execute,
             commands::import_cancel,
+            commands::thumbnail,
+            commands::blob_detail,
+            commands::verify_all,
+            commands::import_history,
+            commands::import_report_get,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

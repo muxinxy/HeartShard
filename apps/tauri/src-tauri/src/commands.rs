@@ -170,6 +170,42 @@ pub fn import_cancel(cancel: State<'_, ImportCancel>) {
     cancel.0.store(true, Ordering::Relaxed);
 }
 
+// ---------------- §10/§11 补充：缩略图 / 详情 / 一键体检 / 历史报告 ----------------
+
+#[tauri::command]
+pub fn thumbnail(blob_hash: String, state: State<'_, SessionState>) -> Result<String, String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .thumbnail_cached(&blob_hash)
+        .map_err(err_str)?
+        .ok_or_else(|| "thumbnail not available".to_string())
+}
+
+#[tauri::command]
+pub fn blob_detail(blob_hash: String, state: State<'_, SessionState>) -> Result<crate::library::BlobDetail, String> {
+    state.core.lock().unwrap().blob_detail(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn verify_all(state: State<'_, SessionState>) -> Result<Vec<VerifyReport>, String> {
+    state.core.lock().unwrap().verify_all().map_err(err_str)
+}
+
+#[tauri::command]
+pub fn import_history(state: State<'_, SessionState>) -> Result<Vec<String>, String> {
+    state.core.lock().unwrap().import_history().map_err(err_str)
+}
+
+#[tauri::command]
+pub fn import_report_get(
+    file: String,
+    state: State<'_, SessionState>,
+) -> Result<crate::library::ImportRunReport, String> {
+    state.core.lock().unwrap().import_report_get(&file).map_err(err_str)
+}
+
 #[tauri::command]
 pub fn storage_status(state: State<'_, SessionState>) -> Result<Vec<StorageStatus>, String> {
     state.core.lock().unwrap().storage_status().map_err(err_str)

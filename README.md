@@ -29,10 +29,12 @@ HeartShard 是一个**纯客户端、无后端、端到端加密**的多云相�
 | **M3** | **Android** Tauri 壳（aarch64 APK）+ WebDAV 适配器 + 后台传输 | ✅ 完成（壳/WebDAV/前台服务防回收；§8.5 五阶段向导 UI + import_staging 续传已实现） |
 | **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | OpenList 适配器 ✅（mock 全端点测试，真实实例验收待用户服务）；鸿蒙壳 ⚠️ 需 DevEco/OHOS SDK（本开发机不可用），见 [开发文档](docs/development.md) |
 | **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | 修复 ✅、再平衡 ✅、FTP/FTPS ✅（真实服务验收待端点）、[威胁模型](docs/threat-model.md) ✅；iOS ❌ 需 macOS |
+| **§10 UI** | 时间线虚拟滚动（Virtuoso）+ 懒加载缩略图（加密缓存）+ 详情页（分片分布可视化）+ 一键体检 + 任务中心 + 历史报告重开 | ✅ 完成 |
+| **§11** | 缩略图本地生成并加密缓存 | ✅ 完成（manifest_key 加密，`thumbs/{hash}.enc`） |
 | **产物** | Windows 便携 exe + 安装包；Android APK（aarch64） | ✅ `dist/` 下四件（见上）+ §12.2 三场景 E2E 全绿 |
 
 > 平台优先级（2026-11-01 调整）：**Windows → Android 优先**，iOS 与鸿蒙随后。
-> 剩余如实声明的缺口：任务中心/时间线虚拟滚动/地图视图（§10 剩余 UI）、
+> 剩余如实声明的缺口：地图视图（§10）、真 EXIF 解析（当前用文件时间，M1.5）、
 > 「鸿蒙 100MB WebDAV 分块」E2E（随鸿蒙壳）、增量同步 delta、各协议真实端点验收。
 
 ## 快速开始（开发）

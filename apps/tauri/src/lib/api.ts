@@ -108,6 +108,28 @@ export interface ImportProgress {
   bytes_total: number;
 }
 
+export interface ShardPlacement {
+  chunk_index: number;
+  shard_index: number;
+  storage_id: string;
+  remote_key: string;
+  size: number;
+}
+
+export interface BlobDetail {
+  blob_hash: string;
+  file_name: string;
+  mime: string;
+  total_len: number;
+  taken_at: number;
+  chunk_size: number;
+  n: number;
+  m: number;
+  chunks: number;
+  shards: ShardPlacement[];
+  per_storage: [string, number][];
+}
+
 export const api = {
   sessionStatus: () => invoke<SessionStatus>("session_status"),
   unlock: (password: string) => invoke<SessionStatus>("unlock", { password }),
@@ -129,6 +151,11 @@ export const api = {
   importPreview: (sessionId: string) => invoke<ImportPreview>("import_preview", { sessionId }),
   importExecute: (sessionId: string) => invoke<ImportRunReport>("import_execute", { sessionId }),
   importCancel: () => invoke<void>("import_cancel"),
+  thumbnail: (blobHash: string) => invoke<string>("thumbnail", { blobHash }),
+  blobDetail: (blobHash: string) => invoke<BlobDetail>("blob_detail", { blobHash }),
+  verifyAll: () => invoke<VerifyReport[]>("verify_all"),
+  importHistory: () => invoke<string[]>("import_history"),
+  importReportGet: (file: string) => invoke<ImportRunReport>("import_report_get", { file }),
   pickDirectory: async (): Promise<string | null> => {
     const picked = await open({ directory: true, title: "选择要导入的目录" });
     return typeof picked === "string" ? picked : null;

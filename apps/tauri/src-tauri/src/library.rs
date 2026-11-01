@@ -802,6 +802,132 @@ impl HeartCore {
         Ok(report)
     }
 
+    // ---------------- §10/§11 补充：缩略图 / 详情 / 一键体检 / 历史报告 ----------------
+
+    /// 缩略图缓存读取（PNG data URL）。缓存以 manifest_key 加密于
+    /// `{data_dir}/thumbs/{hash}.{size}.enc`（§11：本地生成并加密缓存）。
+    pub fn thumbnail_cached(&self, blob_hash: &str) -> Result<Option<String>, LibError> {
+        let keys = self.keys_or_err()?;
+        const SIZE: u32 = 256;
+        let cache = self.data_dir.join("thumbs").join(format!("{blob_hash}.{SIZE}.enc"));
+        if !cache.exists() {
+            return Ok(None);
+        }
+        let enc = fs::read(&cache)?;
+        let png = decrypt_bare(keys.manifest_key.as_ref(), &enc)?;
+        use base64::Engine as _;
+        Ok(Some(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        )))
+    }
+
+    /// 缩略图加密缓存写入（导入时由 worker 生成的 PNG 调用）。
+    pub fn thumbnail_cache_put(&self, blob_hash: &str, png: &[u8]) -> Result<(), LibError> {
+        let keys = self.keys_or_err()?;
+        const SIZE: u32 = 256;
+        let thumb_dir = self.data_dir.join("thumbs");
+        fs::create_dir_all(&thumb_dir)?;
+        let cache = thumb_dir.join(format!("{blob_hash}.{SIZE}.enc"));
+        let enc = encrypt_bare(keys.manifest_key.as_ref(), &generate_iv()?, png)?;
+        let tmp = cache.with_extension("tmp");
+        fs::write(&tmp, &enc)?;
+        fs::rename(&tmp, &cache)?;
+        Ok(())
+    }
+
+    /// 从已读入内存的图片字节生成缩略图 PNG。
+    pub fn generate_thumbnail_from_bytes(bytes: &[u8], size: u32) -> Result<Vec<u8>, LibError> {
+        let img = image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| LibError::Data(format!("open image: {e}")))?
+            .decode()
+            .map_err(|e| LibError::Data(format!("decode image: {e}")))?;
+        let thumb = img.thumbnail(size, size);
+        let mut out = std::io::Cursor::new(Vec::new());
+        thumb
+            .write_to(&mut out, image::ImageFormat::Png)
+            .map_err(|e| LibError::Data(format!("encode thumb: {e}")))?;
+        Ok(out.into_inner())
+    }
+
+    /// blob 详情：manifest 中的分片分布（按 Storage 汇总，可视化数据）。
+    pub fn blob_detail(&self, blob_hash: &str) -> Result<BlobDetail, LibError> {
+        let blob_hex = blob_hash.to_lowercase();
+        let manifest = self.load_manifest(&blob_hex)?;
+        let mut per_storage: std::collections::BTreeMap<String, usize> = Default::default();
+        let shards = manifest
+            .shards
+            .iter()
+            .map(|s| {
+                *per_storage.entry(s.storage_id.clone()).or_default() += 1;
+                ShardPlacement {
+                    chunk_index: s.chunk_index,
+                    shard_index: s.shard_index,
+                    storage_id: s.storage_id.clone(),
+                    remote_key: s.remote_key.clone(),
+                    size: s.size,
+                }
+            })
+            .collect();
+        Ok(BlobDetail {
+            blob_hash: blob_hex,
+            file_name: manifest.file_name,
+            mime: manifest.mime,
+            total_len: manifest.total_len as i64,
+            taken_at: manifest.created_at,
+            chunk_size: manifest.chunk_size,
+            n: manifest.n,
+            m: manifest.m,
+            chunks: manifest.chunks.len(),
+            shards,
+            per_storage: per_storage.into_iter().collect(),
+        })
+    }
+
+    /// 一键体检（§10）：对索引中全部 blob 逐一 verify。
+    pub fn verify_all(&self) -> Result<Vec<VerifyReport>, LibError> {
+        let mut out = Vec::new();
+        for b in self.list_blobs()? {
+            out.push(self.verify_blob(&b.blob_hash)?);
+        }
+        Ok(out)
+    }
+
+    /// 导入运行报告落盘（§10.2 历史报告可重开）。
+    pub fn save_import_report(&self, report: &ImportRunReport) -> Result<String, LibError> {
+        let dir = self.data_dir.join("import-reports");
+        fs::create_dir_all(&dir)?;
+        let name = format!(
+            "import-report-{}-{}.json",
+            report.session_id,
+            now_secs()
+        );
+        fs::write(dir.join(&name), serde_json::to_vec_pretty(report)?)?;
+        Ok(name)
+    }
+
+    /// 历史报告列表（文件名新→旧）。
+    pub fn import_history(&self) -> Result<Vec<String>, LibError> {
+        let dir = self.data_dir.join("import-reports");
+        let mut names: Vec<String> = std::fs::read_dir(&dir)?
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".json"))
+            .collect();
+        names.sort_by(|a, b| b.cmp(a));
+        Ok(names)
+    }
+
+    /// 重开一份历史报告（只允许纯文件名，防路径逃逸）。
+    pub fn import_report_get(&self, file: &str) -> Result<ImportRunReport, LibError> {
+        if file.contains('/') || file.contains('\\') || file.contains("..") {
+            return Err(LibError::Data("bad report file name".into()));
+        }
+        let raw = fs::read(self.data_dir.join("import-reports").join(file))?;
+        serde_json::from_slice(&raw).map_err(|e| LibError::Data(format!("report corrupt: {e}")))
+    }
+
     /// 注册本地目录 Storage（M2 模拟云端 / 未来 NAS 挂载目录）。
     pub fn add_storage_local(
         &mut self,
@@ -914,7 +1040,34 @@ pub struct ImportPreview {
     pub symlinks: Vec<String>,
 }
 
+/// 单个 shard 的分布信息（来自 manifest；健康状态由 verify_blob 单独给出）。
 #[derive(Debug, Clone, Serialize)]
+pub struct ShardPlacement {
+    pub chunk_index: u32,
+    pub shard_index: u8,
+    pub storage_id: String,
+    pub remote_key: String,
+    pub size: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BlobDetail {
+    pub blob_hash: String,
+    pub file_name: String,
+    pub mime: String,
+    pub total_len: i64,
+    /// 拍摄/修改时间（EXIF DateTimeOriginal 解析在 M1.5；当前为文件 mtime）
+    pub taken_at: i64,
+    pub chunk_size: u32,
+    pub n: u8,
+    pub m: u8,
+    pub chunks: usize,
+    pub shards: Vec<ShardPlacement>,
+    /// 每个 Storage 上的 shard 数（分片分布可视化数据）
+    pub per_storage: Vec<(String, usize)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportRunReport {
     pub session_id: String,
     pub albums_created: usize,
@@ -1227,7 +1380,7 @@ impl HeartCore {
         let mut consecutive_failures = 0usize;
         let mut inflight: Vec<(
             index::sqlite::StagingRow,
-            std::thread::JoinHandle<Result<shard::EncodedBlob, String>>,
+            std::thread::JoinHandle<Result<(shard::EncodedBlob, Option<Vec<u8>>), String>>,
         )> = Vec::new();
         let concurrency = opts.concurrency.max(1).min(8);
 
@@ -1255,8 +1408,14 @@ impl HeartCore {
                     self.storages.iter().map(|s| s.store()).collect::<Result<Vec<_>, _>>()?;
                 let blob_sha: [u8; 32] = decode_hash(&row.sha256)?;
                 let abs_path = PathBuf::from(&row.abs_path);
-                let handle = std::thread::spawn(move || -> Result<shard::EncodedBlob, String> {
+                let handle = std::thread::spawn(move || -> Result<(shard::EncodedBlob, Option<Vec<u8>>), String> {
                     let bytes = read_file_retry(&abs_path)?;
+                    // §11：图片文件顺手生成缩略图 PNG（懒加载 + 加密缓存用）
+                    let thumb = if mime_of(&abs_path).starts_with("image/") {
+                        Self::generate_thumbnail_from_bytes(&bytes, 256).ok()
+                    } else {
+                        None
+                    };
                     let blob_key = keys.blob_key(&blob_sha).map_err(|e| e.to_string())?;
                     let encoded = encode_blob(
                         &bytes,
@@ -1271,7 +1430,7 @@ impl HeartCore {
                         let store = &stores[usize::from(s.shard_index) % stores.len()];
                         store.put(&s.object_key, &s.data).map_err(|e| e.to_string())?;
                     }
-                    Ok(encoded)
+                    Ok((encoded, thumb))
                 });
                 inflight.push((row, handle));
             }
@@ -1284,13 +1443,16 @@ impl HeartCore {
             let size = row.size.max(0) as u64;
             let album_dir = row.rel_path.rsplit_once('/').map(|(d, _)| d.to_string());
             match handle.join() {
-                Ok(Ok(encoded)) => {
+                Ok(Ok((encoded, thumb))) => {
                     consecutive_failures = 0;
                     let blob_hex = hex::encode(encoded.blob_sha256);
                     let album_id = album_dir
                         .as_ref()
                         .and_then(|d| album_ids.get(d).cloned());
                     self.finalize_import_file(&keys, db, &me, &row, &encoded, &blob_hex, album_id)?;
+                    if let Some(png) = thumb {
+                        let _ = self.thumbnail_cache_put(&blob_hex, &png);
+                    }
                     report.imported += 1;
                 }
                 Ok(Err(e)) => {
@@ -1328,6 +1490,9 @@ impl HeartCore {
                 bytes_total: total_bytes,
             });
         }
+
+        // 阶段 5 收尾：报告落盘（§10.2 历史报告可重开）
+        let _ = self.save_import_report(&report);
 
         Ok(report)
     }

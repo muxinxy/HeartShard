@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { Gallery } from "./components/Gallery";
+import { GalleryWithTasks } from "./components/Gallery";
 import { LockScreen } from "./components/LockScreen";
 import { api } from "./lib/api";
 
@@ -15,7 +15,7 @@ function App() {
     return <div className="loading">…</div>;
   }
   return unlocked ? (
-    <Gallery onLock={() => setUnlocked(false)} />
+    <GalleryWithTasks onLock={() => setUnlocked(false)} />
   ) : (
     <LockScreen onUnlocked={() => setUnlocked(true)} />
   );
