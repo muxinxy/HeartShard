@@ -22,14 +22,17 @@ Built for privacy-sensitive users who want their photos on multiple drives / NAS
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0** | MixFile algorithm study + core-rs (keypath / crypto / ida / shard) + locked test vectors | ✅ Done (`fe5d3e6`) |
-| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ✅ Done (E2E green) |
+| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ✅ Done (E2E green); the §8.5 five-phase directory-import wizard is later UI work |
 | **M2** | S3 adapter (SigV4) + SQLCipher index + two-device Lamport sync | ✅ Done (timelines converge in E2E; conflict rulings unit-tested) |
-| **M3** | **Android** Tauri shell (aarch64 APK) + WebDAV adapter | ✅ Done (WebDAV mock integration test; APK from release build) |
-| **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | ⚠️ Constrained: requires DevEco/OHOS SDK (unavailable on this dev machine) — see platform limits in the [dev guide](docs/development.en.md) |
-| **M5** | iOS + FTP/FTPS + repair/rebalance + threat-model document | ✅ Core done (repair E2E, FTP/FTPS adapter, [threat model](docs/threat-model.md)); iOS requires macOS |
+| **M3** | **Android** Tauri shell (aarch64 APK) + WebDAV adapter + background transfer | ✅ Shell/WebDAV/foreground service (notification keeps process alive during imports) done; long-run on-device soak pending a real device |
+| **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | OpenList adapter ✅ (mock covers all endpoints; live-instance acceptance pending); HarmonyOS shell ⚠️ requires DevEco/OHOS SDK (unavailable here), see [dev guide](docs/development.en.md) |
+| **M5** | iOS + FTP/FTPS + repair/rebalance + threat-model document | Repair ✅ E2E, rebalance ✅ tested, FTP/FTPS ✅ adapter (live acceptance pending), [threat model](docs/threat-model.md) ✅; iOS ❌ requires macOS |
 | **Artifacts** | Windows portable exe + installers; Android APK (aarch64) | ✅ `tauri build` / `tauri android build --apk` |
 
 > Platform priority (adjusted 2026-11-01): **Windows → Android first**; iOS and HarmonyOS follow.
+> Honest gaps against the brief: directory-import wizard & history UI (§8.5), task center /
+> virtual-scrolled timeline / map views (§10), and §12.2 scenarios such as "5000+ files",
+> "offline resume", "HarmonyOS 100MB WebDAV chunked upload".
 
 ## Getting Started (Development)
 

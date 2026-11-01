@@ -53,6 +53,12 @@ export interface RepairReport {
   shard_count: number;
 }
 
+export interface RebalanceReport {
+  blobs_checked: number;
+  moved: number;
+  failed: string[];
+}
+
 export const api = {
   sessionStatus: () => invoke<SessionStatus>("session_status"),
   unlock: (password: string) => invoke<SessionStatus>("unlock", { password }),
@@ -66,6 +72,9 @@ export const api = {
   syncNow: () => invoke<SyncOutcome>("sync_now"),
   repairBlob: (blobHash: string) => invoke<RepairReport>("repair_blob", { blobHash }),
   storageStatus: () => invoke<StorageStatus[]>("storage_status"),
+  serviceStart: () => invoke<void>("service_start"),
+  serviceStop: () => invoke<void>("service_stop"),
+  rebalanceAll: () => invoke<RebalanceReport>("rebalance_all"),
 
   pickFiles: async (): Promise<string[]> => {
     const picked = await open({

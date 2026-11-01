@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use shard::{encode_blob, ChunkManifestInfo};
 use thiserror::Error;
 
+use crate::storage_openlist::{OpenListConfig, OpenListStore};
 use crate::storage_s3::{S3Config, S3Store};
 
 pub const DEFAULT_CHUNK_SIZE: usize = shard::DEFAULT_CHUNK_SIZE; // 1 MiB
@@ -126,6 +127,13 @@ pub struct RepairReport {
     pub shard_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RebalanceReport {
+    pub blobs_checked: usize,
+    pub moved: usize,
+    pub failed: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Storage 注册表
 // ---------------------------------------------------------------------------
@@ -135,6 +143,7 @@ pub struct RepairReport {
 pub enum StorageConfig {
     LocalDir { id: String, root: String },
     S3(S3Config),
+    OpenList(OpenListConfig),
 }
 
 impl StorageConfig {
@@ -142,6 +151,7 @@ impl StorageConfig {
         match self {
             StorageConfig::LocalDir { id, .. } => id.clone(),
             StorageConfig::S3(c) => c.bucket.clone(),
+            StorageConfig::OpenList(c) => c.base_url.clone(),
         }
     }
 
@@ -149,6 +159,7 @@ impl StorageConfig {
         match self {
             StorageConfig::LocalDir { .. } => "local-dir",
             StorageConfig::S3(_) => "s3",
+            StorageConfig::OpenList(_) => "openlist",
         }
     }
 
@@ -158,6 +169,7 @@ impl StorageConfig {
                 Ok(Box::new(index::store::LocalDirStore::new(root.clone(), id.clone())))
             }
             StorageConfig::S3(c) => Ok(Box::new(S3Store::new(c.clone())?)),
+            StorageConfig::OpenList(c) => Ok(Box::new(OpenListStore::new(c.clone())?)),
         }
     }
 }
@@ -509,7 +521,7 @@ impl HeartCore {
     fn load_manifest(&self, blob_hex: &str) -> Result<Manifest, LibError> {
         let keys = self.keys_or_err()?;
         let remote_key = manifest_object_key(blob_hex)?;
-        // 冗余副本：任一 Storage 读到即可
+        // 冗余副本：任一 Storage 命中即可
         for store in self.all_stores()? {
             if let Some(enc) = store.get(&remote_key) {
                 let json = decrypt_bare(keys.manifest_key.as_ref(), &enc)
@@ -519,6 +531,19 @@ impl HeartCore {
             }
         }
         Err(LibError::ManifestMissing(blob_hex.to_string()))
+    }
+
+    /// 加密 manifest 并冗余写入全部 Storage（§6.4；rebalance 后的回写）。
+    fn save_manifest(&self, blob_hex: &str, manifest: &Manifest) -> Result<(), LibError> {
+        let keys = self.keys_or_err()?;
+        let remote_key = manifest_object_key(blob_hex)?;
+        let bytes = serde_json::to_vec(manifest)?;
+        let iv = generate_iv()?;
+        let enc = encrypt_bare(keys.manifest_key.as_ref(), &iv, &bytes)?;
+        for store in self.all_stores()? {
+            store.put(&remote_key, &enc)?;
+        }
+        Ok(())
     }
 
     pub fn export_blob(&self, blob_hash: &str, dest_path: impl AsRef<Path>) -> Result<(), LibError> {
@@ -635,6 +660,18 @@ impl HeartCore {
         Ok(id)
     }
 
+    /// 注册 OpenList Storage（M4 适配器；真实实例连通性以实测为准）。
+    pub fn add_storage_openlist(&mut self, config: OpenListConfig) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let id = config.base_url.clone();
+        if self.storages.iter().any(|s| s.id() == id) {
+            return Err(LibError::Data(format!("storage {id} already registered")));
+        }
+        self.storages.push(StorageConfig::OpenList(config));
+        self.save_registry(&keys)?;
+        Ok(id)
+    }
+
     /// 修复任务（M5）：对每个受损 chunk，用健康 shard RS 重组出原密文，
     /// 重新分散并把受损 shard 位置重写（RS 编码确定性 ⇒ shard 字节与 SHA 不变）。
     pub fn repair_blob(&self, blob_hash: &str) -> Result<RepairReport, LibError> {
@@ -703,6 +740,66 @@ impl HeartCore {
             unrecoverable,
             shard_count: manifest.shards.len(),
         })
+    }
+
+    /// 再平衡任务（M5）：把每个 shard 移到按策略（`shard_index % 存储数`）
+    /// 应属的 Storage。Storage 增删后、或导入时策略导致同 chunk 的多个 shard
+    /// 同桶时，重排可恢复分散不变量。数据原子搬迁（先放新、再删旧），
+    /// manifest 全量冗余回写。
+    pub fn rebalance_all(&self) -> Result<RebalanceReport, LibError> {
+        self.keys_or_err()?;
+        let db = self.db_or_err()?;
+        if self.storages.is_empty() {
+            return Err(LibError::Data("no storage configured".into()));
+        }
+        let mut report = RebalanceReport {
+            blobs_checked: 0,
+            moved: 0,
+            failed: Vec::new(),
+        };
+
+        for blob in db.load_blobs()? {
+            if blob.record.deleted_at.is_some() {
+                continue;
+            }
+            report.blobs_checked += 1;
+            let blob_hex = blob.record.hash.clone();
+            let mut manifest = self.load_manifest(&blob_hex)?;
+            let mut changed = false;
+
+            for s in &mut manifest.shards {
+                let desired_idx = usize::from(s.shard_index) % self.storages.len();
+                let desired_id = self.storages[desired_idx].id();
+                if s.storage_id == desired_id {
+                    continue; // 已在策略位置
+                }
+                // 取当前数据（缺失/损坏的 shard 归 repair 任务管，不在此搬运）
+                let Some(data) = self
+                    .store_by_id(&s.storage_id)
+                    .ok()
+                    .and_then(|store| store.get(&s.remote_key))
+                else {
+                    report
+                        .failed
+                        .push(format!("[{}] {}（shard 缺失，请先体检+修复）", s.storage_id, s.remote_key));
+                    continue;
+                };
+                let new_key = keypath::shard_object_key(&blob_hex, s.chunk_index, s.shard_index)?;
+                let desired_store = self.store_by_id(&desired_id)?;
+                desired_store.put(&new_key, &data)?;
+                if let Some(old_store) = self.store_by_id(&s.storage_id).ok() {
+                    old_store.delete(&s.remote_key)?;
+                }
+                s.storage_id = desired_id;
+                s.remote_key = new_key;
+                report.moved += 1;
+                changed = true;
+            }
+            if changed {
+                self.save_manifest(&blob_hex, &manifest)?;
+            }
+        }
+        Ok(report)
     }
 
     /// 注册本地目录 Storage（M2 模拟云端 / 未来 NAS 挂载目录）。

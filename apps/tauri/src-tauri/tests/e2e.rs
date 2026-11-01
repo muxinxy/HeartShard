@@ -220,6 +220,41 @@ fn repair_restores_missing_shard() {
 }
 
 #[test]
+fn rebalance_redistributes_shards_after_storage_change() {
+    // M5 再平衡：导入后新增第三个 Storage，rebalance 把 shard 重排到
+    // shard_index % 3 的策略位置，manifest 冗余回写，导出仍逐字节一致。
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = HeartCore::new(dir.path());
+    core.unlock("rebalance-pass").unwrap();
+
+    let src = dir.path().join("photo.png");
+    let blob = random_bytes(0x2BA1, 1_048_576 + 4567);
+    std::fs::write(&src, &blob).unwrap();
+    let outcome = core.import_file(&src).unwrap();
+    let blob_hash = outcome.blob_hash.clone().unwrap();
+
+    // 导入时 2 个 Storage（local-a/local-b）；追加第三个 → 策略位置改变
+    core.add_storage_local("local-c", dir.path().join("storages").join("local-c"))
+        .unwrap();
+    let before = core.verify_blob(&blob_hash).unwrap();
+    assert!(before.ok);
+
+    let report = core.rebalance_all().unwrap();
+    assert!(report.moved > 0, "expected shards to move: {report:?}");
+    let after = core.verify_blob(&blob_hash).unwrap();
+    assert!(after.ok, "all shards must be healthy after rebalance: {after:?}");
+
+    // 每个位置与策略一致（无法从外部直接读 manifest——用导出验证数据完好）
+    let out = dir.path().join("after_rebalance.png");
+    core.export_blob(&blob_hash, &out).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), blob);
+
+    // 再次 rebalance：幂等（无移动）
+    let report2 = core.rebalance_all().unwrap();
+    assert_eq!(report2.moved, 0, "second rebalance must be a no-op");
+}
+
+#[test]
 fn wrong_password_fails_at_unlock() {
     let dir = tempfile::tempdir().unwrap();
     let mut core = HeartCore::new(dir.path());

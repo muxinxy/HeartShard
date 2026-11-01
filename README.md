@@ -24,14 +24,17 @@ HeartShard 是一个**纯客户端、无后端、端到端加密**的多云相�
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | **M0** | MixFile 算法研究 + core-rs（keypath / crypto / ida / shard）+ 测试向量锁定 | ✅ 完成（`fe5d3e6`） |
-| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ✅ 完成（E2E 全绿） |
+| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ✅ 完成（E2E 全绿）；§8.5 目录导入五阶段向导为后续 UI 工作 |
 | **M2** | S3 适配器（SigV4）+ SQLCipher 索引 + 双设备 Lamport 同步 | ✅ 完成（双设备 E2E 时间线一致，冲突裁决单测覆盖） |
-| **M3** | **Android** Tauri 壳（aarch64 APK）+ WebDAV 适配器 | ✅ 完成（WebDAV mock 集成测试；APK 见 Releases 构建） |
-| **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | ⚠️ 受限：需 DevEco/OHOS SDK（本开发机不可用），见 [开发文档](docs/development.md) 平台限制 |
-| **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | ✅ 核心完成（修复任务 E2E、FTP/FTPS 适配器、[威胁模型](docs/threat-model.md)）；iOS 需 macOS 构建 |
+| **M3** | **Android** Tauri 壳（aarch64 APK）+ WebDAV 适配器 + 后台传输 | ✅ 壳/WebDAV/前台服务（Foreground Service + 通知，导入期间防回收）完成；设备端长时间上传实测待真机 |
+| **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | OpenList 适配器 ✅（mock 全端点测试，真实实例验收待用户服务）；鸿蒙壳 ⚠️ 需 DevEco/OHOS SDK（本开发机不可用），见 [开发文档](docs/development.md) |
+| **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | 修复任务 ✅ E2E、再平衡 ✅ 测试、FTP/FTPS ✅ 适配器（真实服务验收待端点）、[威胁模型](docs/threat-model.md) ✅；iOS ❌ 需 macOS |
 | **产物** | Windows 便携 exe + 安装包；Android APK（aarch64） | ✅ `tauri build` / `tauri android build --apk` |
 
 > 平台优先级（2026-11-01 调整）：**Windows → Android 优先**，iOS 与鸿蒙随后。
+> 未做的简报功能面（如实声明）：目录导入五阶段向导与历史报告 UI（§8.5）、
+> 任务中心/时间线虚拟滚动/地图视图（§10）、§12.2 中「5000+ 文件」「断网续传」
+> 「鸿蒙 100MB WebDAV 分块」等场景 E2E。
 
 ## 快速开始（开发）
 

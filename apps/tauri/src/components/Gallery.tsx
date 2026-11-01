@@ -5,6 +5,7 @@ import {
   formatBytes,
   formatDate,
   ImportOutcome,
+  RebalanceReport,
   shortHash,
   StorageStatus,
   SyncOutcome,
@@ -44,6 +45,8 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     setImporting(true);
     setError(null);
     setResults(null);
+    // M3 后台传输：批量导入期间保持前台服务，防止系统回收进程（桌面端静默成功）
+    await api.serviceStart().catch(() => {});
     try {
       const paths = await api.pickFiles();
       if (paths.length === 0) return;
@@ -53,6 +56,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     } catch (e) {
       setError(String(e));
     } finally {
+      await api.serviceStop().catch(() => {});
       setImporting(false);
     }
   };
@@ -116,6 +120,26 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     onLock();
   };
 
+  const doRebalance = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const report: RebalanceReport = await api.rebalanceAll();
+      if (report.moved > 0) {
+        alert(`再平衡完成：检查 ${report.blobs_checked} 个 blob，迁移 ${report.moved} 个 shard。`);
+      } else if (report.failed.length > 0) {
+        alert(`再平衡发现无法搬迁的 shard：\n${report.failed.join("\n")}`);
+      } else {
+        alert(`再平衡完成：检查 ${report.blobs_checked} 个 blob，布局已符合策略，无需迁移。`);
+      }
+      await refresh();
+    } catch (e) {
+      setError(`再平衡失败：${String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // 按拍摄/修改时间倒序分日分组（时间线雏形；M1.5 引入虚拟滚动）
   const groups = useMemo(() => {
     const map = new Map<string, BlobEntry[]>();
@@ -143,6 +167,9 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </button>
         <button onClick={doSync} disabled={syncing}>
           {syncing ? "同步中…" : "同步"}
+        </button>
+        <button onClick={doRebalance} disabled={syncing}>
+          再平衡
         </button>
         <button onClick={refresh}>刷新</button>
         <button onClick={doLock} className="secondary">

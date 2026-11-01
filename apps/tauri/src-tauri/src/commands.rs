@@ -7,9 +7,10 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use crate::library::{
-    BlobEntry, HeartCore, ImportOutcome, LibError, RepairReport, StorageStatus, SyncOutcome,
-    VerifyReport,
+    BlobEntry, HeartCore, ImportOutcome, LibError, RebalanceReport, RepairReport, StorageStatus,
+    SyncOutcome, VerifyReport,
 };
+use crate::service_plugin::MobileService;
 
 /// 全局会话：进程内唯一 HeartCore。
 pub struct SessionState {
@@ -92,9 +93,26 @@ pub fn sync_now(state: State<'_, SessionState>) -> Result<SyncOutcome, String> {
     state.core.lock().unwrap().sync_now().map_err(err_str)
 }
 
+/// 后台传输前台服务（M3）：批量导入/同步前开启，结束后关闭。
+/// Android 上持续通知防止系统回收进程；桌面端静默成功。
+#[tauri::command]
+pub fn service_start(service: State<'_, MobileService>) -> Result<(), String> {
+    service.start().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn service_stop(service: State<'_, MobileService>) -> Result<(), String> {
+    service.stop().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn repair_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<RepairReport, String> {
     state.core.lock().unwrap().repair_blob(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn rebalance_all(state: State<'_, SessionState>) -> Result<RebalanceReport, String> {
+    state.core.lock().unwrap().rebalance_all().map_err(err_str)
 }
 
 #[tauri::command]
