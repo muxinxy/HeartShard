@@ -10,7 +10,7 @@ use crate::models::{BlobAlbumRecord, AlbumRecord, BlobRecord, Versioned};
 use crypto::{decrypt_bare, encrypt_bare, CryptoError};
 use keypath::index_object_key;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IndexDelta {
     pub device_id: String,
     /// 发布时刻该设备的 Lamport 时钟。
@@ -76,6 +76,8 @@ mod tests {
                     mime: "image/png".into(),
                     width: 0,
                     height: 0,
+                    gps_lat: None,
+                    gps_lon: None,
                     taken_at: 1700000001,
                     chunk_size: 1048576,
                     n: 4,

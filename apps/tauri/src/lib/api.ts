@@ -22,6 +22,8 @@ export interface BlobEntry {
   total_len: number;
   taken_at: number; // unix 秒
   imported_at: number;
+  gps_lat: number | null;
+  gps_lon: number | null;
 }
 
 export interface VerifyReport {

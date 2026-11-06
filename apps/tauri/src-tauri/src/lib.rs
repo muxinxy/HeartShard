@@ -6,6 +6,7 @@ pub mod service_plugin;
 pub mod storage_ftp;
 pub mod storage_openlist;
 pub mod storage_s3;
+pub mod storage_video;
 pub mod storage_webdav;
 
 use tauri::Manager;
@@ -15,6 +16,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .register_uri_scheme_protocol("heartshard-video", |ctx, request| {
+            storage_video::handle_video_request(&ctx, request)
+        })
         .plugin(
             // M3 后台传输：Android 前台服务插件（Kotlin 侧在 gen/android）。
             // 桌面端 setup 为空操作，命令静默成功。

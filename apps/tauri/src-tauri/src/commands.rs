@@ -16,7 +16,7 @@ use crate::service_plugin::MobileService;
 
 /// 全局会话：进程内唯一 HeartCore。
 pub struct SessionState {
-    core: Mutex<HeartCore>,
+    pub(crate) core: Mutex<HeartCore>,
 }
 
 impl SessionState {

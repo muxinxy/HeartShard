@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS blobs(
   mime TEXT NOT NULL DEFAULT '',
   width INTEGER NOT NULL DEFAULT 0,
   height INTEGER NOT NULL DEFAULT 0,
+  gps_lat REAL,
+  gps_lon REAL,
   taken_at INTEGER NOT NULL DEFAULT 0,
   chunk_size INTEGER NOT NULL,
   n INTEGER NOT NULL,
@@ -272,12 +274,12 @@ impl IndexDb {
         };
         if outcome == MergeOutcome::TookRemote {
             self.conn.execute(
-                "INSERT INTO blobs(hash,file_name,size,mime,width,height,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,sync_lamport,sync_device)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+                "INSERT INTO blobs(hash,file_name,size,mime,width,height,gps_lat,gps_lon,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,sync_lamport,sync_device)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
                  ON CONFLICT(hash) DO UPDATE SET
-                   file_name=?2, size=?3, mime=?4, width=?5, height=?6, taken_at=?7, chunk_size=?8,
-                   n=?9, m=?10, manifest_storage_key=?11, created_at=?12, deleted_at=?13,
-                   sync_lamport=?14, sync_device=?15",
+                   file_name=?2, size=?3, mime=?4, width=?5, height=?6, gps_lat=?7, gps_lon=?8,
+                   taken_at=?9, chunk_size=?10, n=?11, m=?12, manifest_storage_key=?13,
+                   created_at=?14, deleted_at=?15, sync_lamport=?16, sync_device=?17",
                 params![
                     r.hash,
                     r.file_name,
@@ -285,6 +287,8 @@ impl IndexDb {
                     r.mime,
                     r.width,
                     r.height,
+                    r.gps_lat,
+                    r.gps_lon,
                     r.taken_at,
                     r.chunk_size,
                     r.n,
@@ -302,12 +306,12 @@ impl IndexDb {
 
     pub fn load_blobs(&self) -> Result<Vec<Versioned<BlobRecord>>, IndexError> {
         let mut stmt = self.conn.prepare(
-            "SELECT hash,file_name,size,mime,width,height,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,sync_lamport,sync_device FROM blobs",
+            "SELECT hash,file_name,size,mime,width,height,gps_lat,gps_lon,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,sync_lamport,sync_device FROM blobs",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Versioned {
-                lamport: row.get::<_, i64>(13)?.max(0) as u64,
-                device_id: row.get(14)?,
+                lamport: row.get::<_, i64>(15)?.max(0) as u64,
+                device_id: row.get(16)?,
                 record: BlobRecord {
                     hash: row.get(0)?,
                     file_name: row.get(1)?,
@@ -315,13 +319,15 @@ impl IndexDb {
                     mime: row.get(3)?,
                     width: row.get(4)?,
                     height: row.get(5)?,
-                    taken_at: row.get(6)?,
-                    chunk_size: row.get(7)?,
-                    n: row.get(8)?,
-                    m: row.get(9)?,
-                    manifest_storage_key: row.get(10)?,
-                    created_at: row.get(11)?,
-                    deleted_at: row.get(12)?,
+                    gps_lat: row.get(6)?,
+                    gps_lon: row.get(7)?,
+                    taken_at: row.get(8)?,
+                    chunk_size: row.get(9)?,
+                    n: row.get(10)?,
+                    m: row.get(11)?,
+                    manifest_storage_key: row.get(12)?,
+                    created_at: row.get(13)?,
+                    deleted_at: row.get(14)?,
                 },
             })
         })?;

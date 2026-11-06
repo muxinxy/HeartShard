@@ -30,6 +30,8 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
     try {
       await api.updateSettings(s);
       setSettings(s);
+      // §10 主题切换：settings.theme 驱动 body class
+      document.body.className = s.theme === "light" ? "theme-light" : "";
       setSaveMsg("已保存。修改分片参数只影响新上传。");
       setTimeout(() => setSaveMsg(null), 3000);
     } catch (e) {

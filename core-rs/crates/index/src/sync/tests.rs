@@ -13,6 +13,8 @@ fn blob(hash: String, name_suffix: &str) -> BlobRecord {
         mime: format!("image/{name_suffix}"),
         width: 0,
         height: 0,
+        gps_lat: None,
+        gps_lon: None,
         taken_at: 100,
         chunk_size: 1048576,
         n: 4,
@@ -32,7 +34,6 @@ fn album(id: &str, name: &str) -> AlbumRecord {
         import_source: None,
         local_only: false,
         cover_hash: String::new(),
-        local_only: false,
         created_at: 1,
         deleted_at: None,
     }
@@ -94,9 +95,9 @@ fn two_devices_converge_on_shared_storages() {
     let rep_b2 = sync_now(&db_b, &[&store_b1, &store_b2], &KEY, 1002).unwrap();
     assert_eq!(rep_b2.applied_objects, 0);
 
-    // A 回拉 B 的两次发布（lamport 2 同步转发 + lamport 3 新增 B 的照片）
+    // A 回拉 B 的 lamport-2 发布（B 只发布过一次）
     let rep_a2 = sync_now(&db_a, &[&store_a1, &store_a2], &KEY, 1003).unwrap();
-    assert_eq!(rep_a2.applied_objects, 2);
+    assert_eq!(rep_a2.applied_objects, 1);
     assert_eq!(db_a.load_blobs().unwrap(), db_b.load_blobs().unwrap());
 }
 

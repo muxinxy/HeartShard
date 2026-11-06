@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 带同步版本的记录。合并规则见 [`crate::merge`]。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Versioned<T> {
     /// 记录最后变更时所在设备的 Lamport 时钟值。
     pub lamport: u64,
@@ -14,7 +14,8 @@ pub struct Versioned<T> {
 
 /// blob 元数据。`hash` 是全局主键（64 hex 小写）。
 /// `file_name` 为时间线展示用（简报 §7.1 schema 的超集列，随 SQLCipher 加密落盘）。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `gps_lat`/`gps_lon` 为 EXIF GPS（§10 地图视图；schema 超集列）。f64 无 Eq。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlobRecord {
     pub hash: String,
     pub file_name: String,
@@ -23,6 +24,8 @@ pub struct BlobRecord {
     pub width: i64,
     pub height: i64,
     pub taken_at: i64,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
     pub chunk_size: i64,
     pub n: i64,
     pub m: i64,

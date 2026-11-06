@@ -2,9 +2,37 @@
   font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
   font-size: 15px;
   line-height: 1.5;
-  color: #e8e6e3;
-  background-color: #14161a;
+  /* CSS 变量：深色主题默认值（§10 设置页深色/浅色切换） */
+  --bg: var(--bg);
+  --bg-card: var(--bg-card);
+  --bg-input: var(--bg-input);
+  --bg-toolbar: var(--bg-toolbar);
+  --border: var(--border);
+  --border-input: var(--border-input);
+  --text: var(--text);
+  --text-muted: var(--text-muted);
+  --text-dim: var(--text-dim);
+  --accent: var(--accent);
+  --accent-soft: rgba(91, 141, 239, 0.12);
+  --success: var(--success);
+  --error: var(--error);
   -webkit-font-smoothing: antialiased;
+}
+
+body.theme-light {
+  --bg: #f5f6f8;
+  --bg-card: #ffffff;
+  --bg-input: #eef0f3;
+  --bg-toolbar: rgba(245, 246, 248, 0.92);
+  --border: #d8dce2;
+  --border-input: #c5cad2;
+  --text: #1a1d21;
+  --text-muted: #5a5f66;
+  --text-dim: #9a9ea6;
+  --accent: #3d6fe0;
+  --accent-soft: rgba(61, 111, 224, 0.1);
+  --success: #2e9e5c;
+  --error: #d44;
 }
 
 * {
@@ -19,7 +47,7 @@ body {
   display: grid;
   place-items: center;
   height: 100vh;
-  color: #8a8f98;
+  color: var(--text-muted);
 }
 
 /* ---------- 锁定屏 ---------- */
@@ -28,14 +56,14 @@ body {
   display: grid;
   place-items: center;
   height: 100vh;
-  background: radial-gradient(ellipse at top, #1c2230 0%, #14161a 60%);
+  background: radial-gradient(ellipse at top, #1c2230 0%, var(--bg) 60%);
 }
 
 .lock-card {
   width: 360px;
   padding: 40px 32px;
   border-radius: 16px;
-  background: #1b1e24;
+  background: var(--bg-card);
   border: 1px solid #2a2e36;
   text-align: center;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
@@ -48,7 +76,7 @@ body {
 
 .tagline {
   margin: 0 0 24px;
-  color: #8a8f98;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -56,15 +84,15 @@ body {
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #333845;
-  background: #12141a;
+  border: 1px solid var(--border-input);
+  background: var(--bg-input);
   color: inherit;
   margin-bottom: 12px;
 }
 
 .lock-card input:focus {
   outline: none;
-  border-color: #5b8def;
+  border-color: var(--accent);
 }
 
 .lock-card button {
@@ -72,7 +100,7 @@ body {
   padding: 10px;
   border-radius: 8px;
   border: none;
-  background: #5b8def;
+  background: var(--accent);
   color: #fff;
   font-weight: 600;
   cursor: pointer;
@@ -90,7 +118,7 @@ body {
 }
 
 .error {
-  color: #ef6a6a;
+  color: var(--error);
   font-size: 13px;
 }
 
@@ -110,9 +138,9 @@ body {
   align-items: center;
   gap: 8px;
   padding: 14px 0;
-  background: rgba(20, 22, 26, 0.92);
+  background: var(--bg-toolbar);
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid #23262d;
+  border-bottom: 1px solid var(--border);
 }
 
 .brand {
@@ -122,7 +150,7 @@ body {
 
 .storages {
   margin-left: 10px;
-  color: #6f7680;
+  color: var(--text-dim);
   font-size: 12px;
 }
 
@@ -134,7 +162,7 @@ body {
 .blob-actions button {
   padding: 6px 14px;
   border-radius: 8px;
-  border: 1px solid #333845;
+  border: 1px solid var(--border-input);
   background: #1e2129;
   color: inherit;
   cursor: pointer;
@@ -142,11 +170,11 @@ body {
 
 .toolbar button:hover,
 .blob-actions button:hover {
-  border-color: #5b8def;
+  border-color: var(--accent);
 }
 
 .toolbar button.secondary {
-  color: #9aa0aa;
+  color: var(--text-muted);
 }
 
 .notice {
@@ -160,7 +188,7 @@ body {
 
 .notice.error {
   border-color: #5c2b2b;
-  color: #ef6a6a;
+  color: var(--error);
 }
 
 .result {
@@ -169,19 +197,19 @@ body {
 
 .result code {
   margin-left: 6px;
-  color: #9aa0aa;
+  color: var(--text-muted);
 }
 
 .empty {
   text-align: center;
   margin-top: 120px;
-  color: #8a8f98;
+  color: var(--text-muted);
 }
 
 .day-group h2 {
   font-size: 14px;
   font-weight: 600;
-  color: #9aa0aa;
+  color: var(--text-muted);
   margin: 28px 0 8px;
 }
 
@@ -189,7 +217,7 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid #23262d;
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -203,7 +231,7 @@ body {
 }
 
 .blob-row + .blob-row {
-  border-top: 1px solid #23262d;
+  border-top: 1px solid var(--border);
 }
 
 .blob-main {
@@ -220,12 +248,12 @@ body {
 }
 
 .blob-main .meta {
-  color: #8a8f98;
+  color: var(--text-muted);
   font-size: 12.5px;
 }
 
 .blob-main code {
-  color: #6f7680;
+  color: var(--text-dim);
 }
 
 .blob-actions {
@@ -241,12 +269,12 @@ body {
 }
 
 .badge.ok {
-  color: #7ed6a0;
+  color: var(--success);
   background: rgba(126, 214, 160, 0.12);
 }
 
 .badge.bad {
-  color: #ef6a6a;
+  color: var(--error);
   background: rgba(239, 106, 106, 0.12);
 }
 
@@ -265,7 +293,7 @@ body {
   height: 56px;
   border-radius: 8px;
   overflow: hidden;
-  background: #12141a;
+  background: var(--bg-input);
   flex-shrink: 0;
 }
 
@@ -297,7 +325,7 @@ body {
   max-width: 92vw;
   max-height: 84vh;
   overflow: auto;
-  background: #1b1e24;
+  background: var(--bg-card);
   border: 1px solid #2a2e36;
   border-radius: 16px;
   padding: 20px 24px;
@@ -318,11 +346,11 @@ body {
 
 .meta-table td {
   padding: 4px 8px;
-  border-bottom: 1px solid #23262d;
+  border-bottom: 1px solid var(--border);
 }
 
 .meta-table td:first-child {
-  color: #8a8f98;
+  color: var(--text-muted);
   width: 120px;
 }
 
@@ -366,7 +394,7 @@ body {
   right: 16px;
   bottom: 16px;
   width: 320px;
-  background: #1b1e24;
+  background: var(--bg-card);
   border: 1px solid #2a2e36;
   border-radius: 12px;
   padding: 10px 14px;
@@ -377,7 +405,7 @@ body {
 .task-panel-title {
   font-weight: 700;
   font-size: 12px;
-  color: #8a8f98;
+  color: var(--text-muted);
   margin-bottom: 6px;
 }
 
@@ -390,14 +418,14 @@ body {
 }
 
 .task-state {
-  color: #9aa0aa;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 button.link {
   background: none;
   border: none;
-  color: #5b8def;
+  color: var(--accent);
   cursor: pointer;
   padding: 2px 0;
   font-size: 13px;
@@ -406,7 +434,7 @@ button.link {
 /* ---------- 设置页 / 相册树 ---------- */
 
 .settings-card {
-  background: #1b1e24;
+  background: var(--bg-card);
   border: 1px solid #2a2e36;
   border-radius: 12px;
   padding: 16px 20px;
@@ -417,8 +445,8 @@ button.link {
 .settings-card select {
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid #333845;
-  background: #12141a;
+  border: 1px solid var(--border-input);
+  background: var(--bg-input);
   color: inherit;
   margin: 4px 0;
 }
@@ -428,7 +456,7 @@ button.link {
   padding: 6px 14px;
   border-radius: 8px;
   border: none;
-  background: #5b8def;
+  background: var(--accent);
   color: #fff;
   font-weight: 600;
   cursor: pointer;
@@ -456,7 +484,7 @@ button.link {
   gap: 8px;
   padding: 10px 14px;
   background: #191c22;
-  border-bottom: 1px solid #23262d;
+  border-bottom: 1px solid var(--border);
   cursor: grab;
 }
 
@@ -465,7 +493,7 @@ button.link {
 }
 
 .album-row.drop-target {
-  border-top: 2px solid #5b8def;
+  border-top: 2px solid var(--accent);
 }
 
 .drag-handle {
@@ -483,7 +511,7 @@ button.link {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid #23262d;
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -495,7 +523,7 @@ button.link {
 }
 
 .wizard-actions .primary {
-  background: #5b8def;
+  background: var(--accent);
   color: #fff;
   border: none;
   font-weight: 600;
@@ -504,14 +532,14 @@ button.link {
 .bar {
   height: 10px;
   border-radius: 999px;
-  background: #23262d;
+  background: var(--border);
   overflow: hidden;
   margin-top: 12px;
 }
 
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #5b8def, #7ed6a0);
+  background: linear-gradient(90deg, var(--accent), var(--success));
   transition: width 0.3s ease;
 }
 

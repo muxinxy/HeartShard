@@ -9,6 +9,8 @@ fn blob(hash: &str, taken_at: i64) -> BlobRecord {
         mime: "image/jpeg".into(),
         width: 0,
         height: 0,
+        gps_lat: None,
+        gps_lon: None,
         taken_at,
         chunk_size: 1_048_576,
         n: 4,
@@ -28,7 +30,6 @@ fn album(id: &str, name: &str) -> AlbumRecord {
         import_source: None,
         local_only: false,
         cover_hash: String::new(),
-        local_only: false,
         created_at: 1,
         deleted_at: None,
     }

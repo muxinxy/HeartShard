@@ -73,13 +73,16 @@ pub struct HeartCore {
 }
 
 /// 时间线/列表条目。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlobEntry {
     pub blob_hash: String,
     pub file_name: String,
     pub mime: String,
     pub total_len: i64,
     pub taken_at: i64,
+    /// EXIF GPS（§10 地图视图；无 GPS 为 None）
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -561,6 +564,13 @@ impl HeartCore {
         let blob_sha256 = crypto::sha256(&blob);
         let blob_hex = hex::encode(blob_sha256);
 
+        // §10 EXIF 解析（图片文件）
+        let exif_data = if mime_of(path).starts_with("image/") {
+            parse_exif_from_bytes(&blob)
+        } else {
+            ExifData::default()
+        };
+
         // 去重（§8.4）
         if db.load_blobs()?.iter().any(|v| v.record.hash == blob_hex) {
             return Ok((blob_hex, true));
@@ -634,9 +644,11 @@ impl HeartCore {
                 file_name: manifest.file_name.clone(),
                 size: manifest.total_len as i64,
                 mime: manifest.mime.clone(),
-                width: 0,
-                height: 0,
-                taken_at,
+                width: exif_data.width.unwrap_or(0),
+                height: exif_data.height.unwrap_or(0),
+                gps_lat: exif_data.gps_lat,
+                gps_lon: exif_data.gps_lon,
+                taken_at: exif_data.taken_at.unwrap_or(taken_at),
                 chunk_size: s.chunk_size as i64,
                 n: s.n as i64,
                 m: s.m as i64,
@@ -661,6 +673,8 @@ impl HeartCore {
                 mime: v.record.mime,
                 total_len: v.record.size,
                 taken_at: v.record.taken_at,
+                gps_lat: v.record.gps_lat,
+                gps_lon: v.record.gps_lon,
             })
             .collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
@@ -1479,6 +1493,113 @@ impl Default for ImportOptions {
     }
 }
 
+/// EXIF 解析结果（§10 详情 + 地图视图）。
+#[derive(Debug, Default, Clone)]
+pub struct ExifData {
+    pub taken_at: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+}
+
+/// 从图片字节解析 EXIF DateTimeOriginal / PixelXDimension / GPS。
+/// 非 JPEG 或无 EXIF 返回 Default。
+fn parse_exif_from_bytes(bytes: &[u8]) -> ExifData {
+    let mut out = ExifData::default();
+    let mut cursor = std::io::Cursor::new(bytes);
+    let reader = exif::Reader::new();
+    let Ok(exif) = reader.read_from_container(&mut cursor) else { return out };
+
+    // DateTimeOriginal → unix ts（ASCII 值 "YYYY:MM:DD HH:MM:SS"）
+    if let Some(dt) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
+        if let exif::Value::Ascii(ref strings) = dt.value {
+            if let Some(bytes) = strings.first() {
+                let s = String::from_utf8_lossy(bytes);
+                let parts: Vec<&str> = s.split(' ').collect();
+                if parts.len() == 2 {
+                    let date: Vec<u32> = parts[0].split(':').filter_map(|p| p.parse().ok()).collect();
+                    let time: Vec<u32> = parts[1].split(':').filter_map(|p| p.parse().ok()).collect();
+                    if date.len() == 3 && time.len() == 3 {
+                        let (y, mo, d) = (date[0] as i64, date[1], date[2]);
+                        let days = days_from_civil(y, mo, d);
+                        out.taken_at = Some(
+                            days * 86_400
+                                + (time[0] as i64) * 3600
+                                + (time[1] as i64) * 60
+                                + time[2] as i64,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // PixelXDimension / PixelYDimension
+    if let Some(w) = exif.get_field(exif::Tag::PixelXDimension, exif::In::PRIMARY) {
+        if let exif::Value::Long(ref v) = w.value {
+            if let Some(&x) = v.first() {
+                out.width = Some(x as i64);
+            }
+        }
+    }
+    if let Some(h) = exif.get_field(exif::Tag::PixelYDimension, exif::In::PRIMARY) {
+        if let exif::Value::Long(ref v) = h.value {
+            if let Some(&y) = v.first() {
+                out.height = Some(y as i64);
+            }
+        }
+    }
+
+    // GPS: 度/分/秒 有理数 + N/S/E/W 参考
+    fn dms_to_deg(v: &exif::Value) -> Option<f64> {
+        if let exif::Value::Rational(rationals) = v {
+            if rationals.len() >= 3 {
+                let d = rationals[0].to_f64();
+                let m = rationals[1].to_f64();
+                let s = rationals[2].to_f64();
+                return Some(d + m / 60.0 + s / 3600.0);
+            }
+        }
+        None
+    }
+    if let (Some(lat), Some(lat_ref), Some(lon), Some(lon_ref)) = (
+        exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY),
+        exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY),
+        exif.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY),
+        exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY),
+    ) {
+        let lat_is_south = match &lat_ref.value {
+            exif::Value::Ascii(v) => v.first().map(|b| b.first() == Some(&b'S')).unwrap_or(false),
+            _ => false,
+        };
+        let lon_is_west = match &lon_ref.value {
+            exif::Value::Ascii(v) => v.first().map(|b| b.first() == Some(&b'W')).unwrap_or(false),
+            _ => false,
+        };
+        if let (Some(mut la), Some(mut lo)) = (dms_to_deg(&lat.value), dms_to_deg(&lon.value)) {
+            if lat_is_south { la = -la; }
+            if lon_is_west { lo = -lo; }
+            if la != 0.0 || lo != 0.0 {
+                out.gps_lat = Some(la);
+                out.gps_lon = Some(lo);
+            }
+        }
+    }
+    out
+}
+
+/// Howard Hinnant civil_from_days（1970-01-01 = day 0），仅 EXIF 解析用。
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let mp = if m > 2 { m - 3 } else { m + 9 } as u64;
+    let doy = (153 * mp + 2) / 5 + d as u64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe as i64 - 719_468
+}
+
 /// import_source 归一化（§8.3）：`\`→`/`、盘符小写、去首尾斜杠。其余大小写保留。
 pub fn normalize_import_source(abs_dir: &str) -> String {
     let s = abs_dir.replace('\\', "/");
@@ -1753,7 +1874,7 @@ impl HeartCore {
         let mut consecutive_failures = 0usize;
         let mut inflight: Vec<(
             index::sqlite::StagingRow,
-            std::thread::JoinHandle<Result<(shard::EncodedBlob, Option<Vec<u8>>), String>>,
+            std::thread::JoinHandle<Result<(shard::EncodedBlob, Option<Vec<u8>>, ExifData), String>>,
         )> = Vec::new();
         let concurrency = opts.concurrency.max(1).min(8);
 
@@ -1782,13 +1903,20 @@ impl HeartCore {
                     self.storages.iter().map(|s| s.store()).collect::<Result<Vec<_>, _>>()?;
                 let blob_sha: [u8; 32] = decode_hash(&row.sha256)?;
                 let abs_path = PathBuf::from(&row.abs_path);
-                let handle = std::thread::spawn(move || -> Result<(shard::EncodedBlob, Option<Vec<u8>>), String> {
+                let handle = std::thread::spawn(move || -> Result<(shard::EncodedBlob, Option<Vec<u8>>, ExifData), String> {
+                    // 返回 3 元组：(编码结果, 缩略图, EXIF)
                     let bytes = read_file_retry(&abs_path)?;
                     // §11：图片文件顺手生成缩略图 PNG（懒加载 + 加密缓存用）
                     let thumb = if mime_of(&abs_path).starts_with("image/") {
                         Self::generate_thumbnail_from_bytes(&bytes, 256).ok()
                     } else {
                         None
+                    };
+                    // §10 EXIF：DateTimeOriginal / GPS / 尺寸
+                    let exif_data = if mime_of(&abs_path).starts_with("image/") {
+                        parse_exif_from_bytes(&bytes)
+                    } else {
+                        ExifData::default()
                     };
                     let blob_key = keys.blob_key(&blob_sha).map_err(|e| e.to_string())?;
                     let encoded = encode_blob(
@@ -1804,7 +1932,7 @@ impl HeartCore {
                         let store = &stores[usize::from(s.shard_index) % stores.len()];
                         store.put(&s.object_key, &s.data).map_err(|e| e.to_string())?;
                     }
-                    Ok((encoded, thumb))
+                    Ok((encoded, thumb, exif_data))
                 });
                 inflight.push((row, handle));
             }
@@ -1817,13 +1945,13 @@ impl HeartCore {
             let size = row.size.max(0) as u64;
             let album_dir = row.rel_path.rsplit_once('/').map(|(d, _)| d.to_string());
             match handle.join() {
-                Ok(Ok((encoded, thumb))) => {
+                Ok(Ok((encoded, thumb, exif_data))) => {
                     consecutive_failures = 0;
                     let blob_hex = hex::encode(encoded.blob_sha256);
                     let album_id = album_dir
                         .as_ref()
                         .and_then(|d| album_ids.get(d).cloned());
-                    self.finalize_import_file(&keys, db, &me, &row, &encoded, &blob_hex, album_id)?;
+                    self.finalize_import_file(&keys, db, &me, &row, &encoded, &blob_hex, album_id, &exif_data)?;
                     if let Some(png) = thumb {
                         let _ = self.thumbnail_cache_put(&blob_hex, &png);
                     }
@@ -1882,6 +2010,7 @@ impl HeartCore {
         encoded: &shard::EncodedBlob,
         blob_hex: &str,
         album_id: Option<String>,
+        exif: &ExifData,
     ) -> Result<(), LibError> {
         let manifest = Manifest {
             version: 1,
@@ -1927,9 +2056,11 @@ impl HeartCore {
                 file_name: manifest.file_name.clone(),
                 size: manifest.total_len as i64,
                 mime: manifest.mime.clone(),
-                width: 0,
-                height: 0,
-                taken_at: row.mtime,
+                width: exif.width.unwrap_or(0),
+                height: exif.height.unwrap_or(0),
+                taken_at: exif.taken_at.unwrap_or(row.mtime),
+                gps_lat: exif.gps_lat,
+                gps_lon: exif.gps_lon,
                 chunk_size: self.settings.chunk_size as i64,
                 n: self.settings.n as i64,
                 m: self.settings.m as i64,

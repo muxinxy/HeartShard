@@ -65,6 +65,19 @@ export function BlobDetailModal({
                 <LargePreview blobHash={detail.blob_hash} />
               </>
             )}
+            {detail.mime.startsWith("video/") && (
+              <>
+                <h3>加密视频在线播放</h3>
+                <video
+                  controls
+                  style={{ width: "100%", borderRadius: 8, maxHeight: 400 }}
+                  src={`heartshard-video://localhost/${detail.blob_hash}`}
+                />
+                <p className="hint">
+                  流式解密播放（Range 分片拉取），不需要完整下载文件。
+                </p>
+              </>
+            )}
             <h3>元数据（EXIF 字段，拍摄时间为文件时间）</h3>
             <table className="meta-table">
               <tbody>
