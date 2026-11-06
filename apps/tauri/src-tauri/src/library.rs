@@ -17,7 +17,7 @@ use crypto::{
 };
 use zeroize::Zeroizing;
 use ida::CODEC_ID;
-use index::models::{BlobRecord, Versioned};
+use index::models::{BlobAlbumRecord, BlobRecord, Versioned};
 use index::sqlite::IndexDb;
 use index::store::BlobStore;
 use index::sync;
@@ -946,24 +946,85 @@ impl HeartCore {
         Ok(())
     }
 
-    /// §10 大图预览：1024px 缩略图（加密缓存，独立于列表 256px）。
-    pub fn thumbnail_large(&self, blob_hash: &str) -> Result<String, LibError> {
-        let keys = self.keys_or_err()?;
-        const SIZE: u32 = 1024;
-        let cache = self.data_dir.join("thumbs").join(format!("{blob_hash}.{SIZE}.enc"));
-        if cache.exists() {
-            let enc = fs::read(&cache)?;
-            let png = decrypt_bare(keys.manifest_key.as_ref(), &enc)?;
-            use base64::Engine as _;
-            return Ok(format!(
-                "data:image/png;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(png)
-            ));
-        }
-        Err(LibError::Data("large thumbnail not cached yet".into()))
+    /// 相册内容：该相册下的全部未删除 blob（按拍摄时间倒序）。
+    pub fn list_album_blobs(&self, album_id: &str) -> Result<Vec<BlobEntry>, LibError> {
+        let db = self.db_or_err()?;
+        let members: std::collections::HashSet<String> = db
+            .load_blob_albums()?
+            .into_iter()
+            .filter(|v| v.record.album_id == album_id && v.record.deleted_at.is_none())
+            .map(|v| v.record.blob_hash)
+            .collect();
+        let mut entries: Vec<BlobEntry> = db
+            .load_blobs()?
+            .into_iter()
+            .filter(|v| v.record.deleted_at.is_none() && members.contains(&v.record.hash))
+            .map(|v| BlobEntry {
+                blob_hash: v.record.hash,
+                file_name: v.record.file_name,
+                mime: v.record.mime,
+                total_len: v.record.size,
+                taken_at: v.record.taken_at,
+                gps_lat: v.record.gps_lat,
+                gps_lon: v.record.gps_lon,
+            })
+            .collect();
+        entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
+        Ok(entries)
     }
 
-    /// 生成并缓存大图（从导出的源文件）。
+    /// 把已有 blob 加入相册（blob_albums 参与增量同步）。
+    pub fn album_add_blob(&self, album_id: &str, blob_hash: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let lamport = db.lamport()? + 1;
+        let record = BlobAlbumRecord {
+            blob_hash: blob_hash.to_lowercase(),
+            album_id: album_id.to_string(),
+            added_at: now_secs(),
+            deleted_at: None,
+        };
+        db.upsert_blob_album(&Versioned {
+            lamport,
+            device_id: me,
+            record,
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// §10 大图预览：1024px 缩略图（加密缓存，独立于列表 256px）。
+    /// 缓存未命中时**按需生成**：完整解密 blob → 缩放 → 加密缓存，无需先导出。
+    pub fn thumbnail_large(&self, blob_hash: &str) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        const SIZE: u32 = 1024;
+        let thumb_dir = self.data_dir.join("thumbs");
+        let cache = thumb_dir.join(format!("{blob_hash}.{SIZE}.enc"));
+        let png = if cache.exists() {
+            let enc = fs::read(&cache)?;
+            decrypt_bare(keys.manifest_key.as_ref(), &enc)?
+        } else {
+            // 按需生成（仅图片；视频走 heartshard-video:// 在线播放）
+            let (bytes, manifest) = self.decrypt_blob_bytes(blob_hash)?;
+            if !manifest.mime.starts_with("image/") {
+                return Err(LibError::Data("not an image blob".into()));
+            }
+            let png = Self::generate_thumbnail_from_bytes(&bytes, SIZE)?;
+            fs::create_dir_all(&thumb_dir)?;
+            let enc = encrypt_bare(keys.manifest_key.as_ref(), &generate_iv()?, &png)?;
+            let tmp = cache.with_extension("tmp");
+            fs::write(&tmp, &enc)?;
+            fs::rename(&tmp, &cache)?;
+            png
+        };
+        use base64::Engine as _;
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        ))
+    }
+
+    /// 生成并缓存大图（从外部源文件，导出流程用）。
     pub fn thumbnail_large_put(&self, blob_hash: &str, src_path: &Path) -> Result<(), LibError> {
         let bytes = fs::read(src_path)?;
         let png = Self::generate_thumbnail_from_bytes(&bytes, 1024)?;
@@ -1016,8 +1077,9 @@ impl HeartCore {
         })
     }
 
-    /// §10 点击预览：解密 blob → 写入临时文件 → 返回路径和 MIME。
-    pub fn preview_blob(&self, blob_hash: &str) -> Result<(PathBuf, String), LibError> {
+    /// 完整解密 blob（RS 重组全部 chunk + SHA-256 校验）。
+    /// preview_blob / 大图缩略图按需生成共用。
+    pub fn decrypt_blob_bytes(&self, blob_hash: &str) -> Result<(Vec<u8>, Manifest), LibError> {
         let keys = self.keys_or_err()?.clone();
         let blob_hex = blob_hash.to_lowercase();
         let manifest = self.load_manifest(&blob_hex)?;
@@ -1050,7 +1112,13 @@ impl HeartCore {
         if crypto::sha256(&decoded) != blob_hash_bytes {
             return Err(LibError::Data("SHA-256 mismatch".into()));
         }
+        Ok((decoded, manifest))
+    }
 
+    /// §10 点击预览：解密 blob → 写入临时文件 → 返回路径和 MIME。
+    pub fn preview_blob(&self, blob_hash: &str) -> Result<(PathBuf, String), LibError> {
+        let (decoded, manifest) = self.decrypt_blob_bytes(blob_hash)?;
+        let blob_hex = blob_hash.to_lowercase();
         let ext = manifest
             .file_name
             .rsplit('.')
@@ -1143,11 +1211,12 @@ impl HeartCore {
     pub fn repair_blob(&self, blob_hash: &str) -> Result<RepairReport, LibError> {
         self.keys_or_err()?;
         let blob_hex = blob_hash.to_lowercase();
-        let manifest = self.load_manifest(&blob_hex)?;
+        let mut manifest = self.load_manifest(&blob_hex)?;
         let config = ida::DispersalConfig::new(manifest.n, manifest.m)?;
 
         let mut repaired = Vec::new();
         let mut unrecoverable = Vec::new();
+        let mut manifest_changed = false;
 
         let chunk_infos: Vec<(u32, &ManifestChunk)> =
             manifest.chunks.iter().enumerate().map(|(i, c)| (i as u32, c)).collect();
@@ -1189,17 +1258,24 @@ impl HeartCore {
             let parts = ida::encode_shards(&ciphertext, config)
                 .map_err(|e| LibError::Data(format!("re-encode failed: {e}")))?;
             for shard_index in damaged {
-                let s = manifest
+                let pos = manifest
                     .shards
                     .iter()
-                    .find(|s| s.chunk_index == chunk_index && s.shard_index == shard_index)
+                    .position(|s| s.chunk_index == chunk_index && s.shard_index == shard_index)
                     .ok_or_else(|| LibError::Data("manifest shard missing".into()))?;
                 // 写到任意一个**当前可用**的 Storage（原存储可能已移除）
+                let remote_key = manifest.shards[pos].remote_key.clone();
                 let mut written = false;
                 for cfg in &self.storages {
                     let store = cfg.store()?;
-                    if store.put(&s.remote_key, &parts[usize::from(shard_index)]).is_ok() {
-                        repaired.push(format!("[{}] {}", cfg.id(), s.remote_key));
+                    if store.put(&remote_key, &parts[usize::from(shard_index)]).is_ok() {
+                        // 落点和 manifest 记录不一致时必须回写 manifest，
+                        // 否则体检仍按旧 storage_id 找 → 永远降级。
+                        if manifest.shards[pos].storage_id != cfg.id() {
+                            manifest.shards[pos].storage_id = cfg.id();
+                            manifest_changed = true;
+                        }
+                        repaired.push(format!("[{}] {}", cfg.id(), remote_key));
                         written = true;
                         break;
                     }
@@ -1208,6 +1284,9 @@ impl HeartCore {
                     unrecoverable.push(chunk_index);
                 }
             }
+        }
+        if manifest_changed {
+            self.save_manifest(&blob_hex, &manifest)?;
         }
 
         Ok(RepairReport {

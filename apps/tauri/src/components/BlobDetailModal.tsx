@@ -12,7 +12,7 @@ function LargePreview({ blobHash }: { blobHash: string }) {
     api
       .thumbnailLarge(blobHash)
       .then(setSrc)
-      .catch(() => setError("大图未缓存（需从导出文件生成）"));
+      .catch(() => setError("大图生成失败（可能不是图片或源数据已损坏）"));
   }, [blobHash]);
 
   if (error) return <p className="hint">{error}</p>;

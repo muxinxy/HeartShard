@@ -1,10 +1,11 @@
-// 时间线（Virtuoso 虚拟滚动 + 懒加载缩略图）+ 工具栏（导入/向导/同步/再平衡/
-// 一键体检）+ 详情模态（分片分布）+ 历史报告重开。
+// 时间线/网格（Virtuoso 虚拟滚动 + 懒加载缩略图）+ 工具栏（导入/向导/同步/再平衡/
+// 一键体检）+ 相册选择与上传 + 拖拽导入 + 详情模态（分片分布）+ 历史报告重开。
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Virtuoso } from "react-virtuoso";
-import { openPath as openWithSystem } from "@tauri-apps/plugin-opener";
+import { Virtuoso, VirtuosoGrid } from "react-virtuoso";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   api,
+  AlbumInfo,
   BlobEntry,
   formatBytes,
   formatDate,
@@ -59,11 +60,16 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<string[] | null>(null);
   const [historyReport, setHistoryReport] = useState<ImportRunReport | null>(null);
+  const [albums, setAlbums] = useState<AlbumInfo[]>([]);
+  const [selectedAlbum, setSelectedAlbum] = useState<string>("");
+  const [albumBlobs, setAlbumBlobs] = useState<BlobEntry[]>([]);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const refresh = useCallback(async () => {
     try {
       setBlobs(await api.listBlobs());
       setStorages(await api.storageStatus());
+      setAlbums(await api.listAlbums());
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -74,23 +80,47 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     refresh();
   }, [refresh]);
 
-  const doImport = async () => {
+  // 切换相册 → 加载该相册内容
+  useEffect(() => {
+    if (!selectedAlbum) {
+      setAlbumBlobs([]);
+      return;
+    }
+    api
+      .listAlbumBlobs(selectedAlbum)
+      .then(setAlbumBlobs)
+      .catch((e) => setError(String(e)));
+  }, [selectedAlbum]);
+
+  const doImportPaths = async (paths: string[], albumId: string | null) => {
+    if (paths.length === 0) return;
     setImporting(true);
     setError(null);
     setResults(null);
-    const taskId = tasks.push("import", "单文件导入");
+    const taskId = tasks.push("import", albumId ? "导入到相册" : "单文件导入");
     await api.serviceStart().catch(() => {});
     try {
-      const paths = await api.pickFiles();
-      if (paths.length === 0) {
-        tasks.finish(taskId, "done", "已取消");
-        return;
-      }
       tasks.update(taskId, { progress: `${paths.length} 个文件` });
       const outcomes = await api.importFiles(paths);
+      let added = 0;
+      if (albumId) {
+        for (const o of outcomes) {
+          if (o.status === "imported" && o.blob_hash) {
+            await api.albumAddBlob(albumId, o.blob_hash).catch(() => {});
+            added++;
+          }
+        }
+      }
       setResults(outcomes);
-      tasks.finish(taskId, "done", `${outcomes.filter((o) => o.status === "imported").length} 已上传`);
+      tasks.finish(
+        taskId,
+        "done",
+        `${outcomes.filter((o) => o.status === "imported").length} 已上传${added > 0 ? ` · ${added} 张已入相册` : ""}`
+      );
       await refresh();
+      if (albumId) {
+        setAlbumBlobs(await api.listAlbumBlobs(albumId));
+      }
     } catch (e) {
       tasks.finish(taskId, "failed", String(e));
       setError(String(e));
@@ -99,6 +129,32 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       setImporting(false);
     }
   };
+
+  const doImport = async () => {
+    const paths = await api.pickFiles();
+    await doImportPaths(paths, null);
+  };
+
+  const doUploadToAlbum = async () => {
+    if (!selectedAlbum) return;
+    const paths = await api.pickFiles();
+    await doImportPaths(paths, selectedAlbum);
+  };
+
+  // 拖拽导入：媒体文件拖进窗口即导入（当前选中相册则入相册）
+  useEffect(() => {
+    const un = getCurrentWebviewWindow().onDragDropEvent((ev) => {
+      if (ev.payload.type !== "drop") return;
+      const media = ev.payload.paths.filter((p) =>
+        /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif|tiff?|mp4|mov|m4v|avi|mkv|webm)$/i.test(p)
+      );
+      if (media.length > 0) doImportPaths(media, selectedAlbum || null);
+    });
+    return () => {
+      un.then((f) => f()).catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAlbum]);
 
   const doSync = async () => {
     setSyncing(true);
@@ -213,7 +269,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     setError(null);
     try {
       const result = await api.previewBlob(blob.blob_hash);
-      await openWithSystem(result.path);
+      await api.openPathSystem(result.path);
     } catch (e) {
       setError(`预览失败：${String(e)}`);
     }
@@ -245,11 +301,14 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     }
   };
 
-  // 按拍摄/修改时间倒序 + 日期分组（Virtuoso flat list + 组头 item）
+  // 展示集：选中相册时为相册内容，否则为全部
+  const displayBlobs = selectedAlbum ? albumBlobs : blobs;
+
+  // 按拍摄/修改时间倒序 + 日期分组（列表视图用）
   const items = useMemo(() => {
     const out: Array<{ type: "header"; key: string; label: string } | { type: "blob"; key: string; blob: BlobEntry }> = [];
     let lastDate = "";
-    for (const b of blobs) {
+    for (const b of displayBlobs) {
       const key = b.taken_at ? new Date(b.taken_at * 1000).toLocaleDateString() : "未知日期";
       if (key !== lastDate) {
         out.push({ type: "header", key: `h-${key}`, label: key });
@@ -258,7 +317,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       out.push({ type: "blob", key: b.blob_hash, blob: b });
     }
     return out;
-  }, [blobs]);
+  }, [displayBlobs]);
 
   const healthBadge = health
     ? `${health.ok}/${health.total} 健康`
@@ -321,6 +380,22 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           <span className="storages" title={storages.map((s) => `${s.id} (${s.kind})`).join(", ")}>
             {healthBadge ?? (storages.length > 0 ? `${storages.length} 个 Storage` : "")}
           </span>
+          <span className="spacer" />
+          <select
+            className="album-select"
+            value={selectedAlbum}
+            onChange={(e) => setSelectedAlbum(e.target.value)}
+          >
+            <option value="">全部照片（{blobs.length}）</option>
+            {albums.map((a) => (
+              <option key={a.id} value={a.id}>
+                📁 {a.name}（{a.blob_count}）
+              </option>
+            ))}
+          </select>
+          <button onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}>
+            {viewMode === "grid" ? "☰ 列表" : "▦ 网格"}
+          </button>
         </div>
         <div className="toolbar-row toolbar-buttons">
           <button onClick={doImport} disabled={importing}>
@@ -348,6 +423,15 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </div>
       </header>
 
+      {selectedAlbum && (
+        <div className="notice album-bar">
+          <strong>📁 {albums.find((a) => a.id === selectedAlbum)?.name ?? "相册"}</strong>
+          <span className="hint" style={{ marginLeft: 8 }}>{displayBlobs.length} 张</span>
+          <button style={{ marginLeft: 12 }} onClick={doUploadToAlbum} disabled={importing}>
+            {importing ? "上传中…" : "上传照片到此相册"}
+          </button>
+        </div>
+      )}
       {results && (
         <div className="notice">
           <strong>本次导入：</strong>
@@ -405,11 +489,40 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </div>
       )}
 
-      {blobs.length === 0 ? (
+      {displayBlobs.length === 0 ? (
         <div className="empty">
-          <p>相册还是空的。</p>
-          <p className="hint">导入的照片会被切片、AES-256-GCM 加密并以 n=4/m=2 纠删冗余存储。</p>
+          {selectedAlbum ? (
+            <>
+              <p>该相册还没有照片。</p>
+              <p className="hint">点上方「上传照片到此相册」，或把文件直接拖进窗口。</p>
+            </>
+          ) : (
+            <>
+              <p>相册还是空的。</p>
+              <p className="hint">点「导入照片 / 视频」选择文件，或把文件直接拖进窗口。导入的照片会被切片、AES-256-GCM 加密并以 n=4/m=2 纠删冗余存储。</p>
+            </>
+          )}
         </div>
+      ) : viewMode === "grid" ? (
+        <VirtuosoGrid
+          style={{ height: "calc(100vh - 190px)", paddingTop: 8 }}
+          totalCount={displayBlobs.length}
+          listClassName="photo-grid"
+          itemClassName="photo-cell"
+          itemContent={(index: number) => {
+            const b = displayBlobs[index];
+            return (
+              <div
+                className="photo-cell-inner"
+                onClick={() => setDetailBlob(b)}
+                title={`${b.file_name} · ${formatBytes(b.total_len)}`}
+              >
+                <Thumb blobHash={b.blob_hash} mime={b.mime} />
+                <span className="cell-label">{b.file_name}</span>
+              </div>
+            );
+          }}
+        />
       ) : (
         <Virtuoso
           style={{ height: "calc(100vh - 140px)", paddingTop: 8 }}

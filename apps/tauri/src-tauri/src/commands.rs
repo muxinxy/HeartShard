@@ -366,6 +366,32 @@ pub fn remove_storage(id: String, state: State<'_, SessionState>) -> Result<(), 
     state.core.lock().unwrap().remove_storage(&id).map_err(err_str)
 }
 
+#[tauri::command]
+pub fn list_album_blobs(
+    album_id: String,
+    state: State<'_, SessionState>,
+) -> Result<Vec<crate::library::BlobEntry>, String> {
+    state.core.lock().unwrap().list_album_blobs(&album_id).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn album_add_blob(
+    album_id: String,
+    blob_hash: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.core.lock().unwrap().album_add_blob(&album_id, &blob_hash).map_err(err_str)
+}
+
+/// 系统默认程序打开文件/目录（Rust 侧调用，不经 capability 校验）。
+#[tauri::command]
+pub fn open_path_system(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| format!("open path failed: {e}"))
+}
+
 /// §10 点击预览：解密 blob → 临时文件 → 返回 (路径, MIME)。
 #[tauri::command]
 pub fn preview_blob(

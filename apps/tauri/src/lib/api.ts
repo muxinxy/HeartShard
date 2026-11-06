@@ -208,6 +208,11 @@ export const api = {
     invoke<void>("album_set_sort", { albumId, sortOrder, parentId }),
   albumSetCover: (albumId: string, blobHash: string) =>
     invoke<void>("album_set_cover", { albumId, blobHash }),
+  listAlbumBlobs: (albumId: string) =>
+    invoke<BlobEntry[]>("list_album_blobs", { albumId }),
+  albumAddBlob: (albumId: string, blobHash: string) =>
+    invoke<void>("album_add_blob", { albumId, blobHash }),
+  openPathSystem: (path: string) => invoke<void>("open_path_system", { path }),
   thumbnailLarge: (blobHash: string) => invoke<string>("thumbnail_large", { blobHash }),
   pickDirectory: async (): Promise<string | null> => {
     const picked = await open({ directory: true, title: "选择要导入的目录" });
