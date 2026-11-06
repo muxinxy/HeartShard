@@ -44,5 +44,61 @@ $replacement = @'
 if (-not $content.Contains($needle)) {
     throw "patch anchor not found in lib.rs - openssl-src version changed; review manually"
 }
-Set-Content -Path $lib -Value $content.Replace($needle, $replacement) -NoNewline -Encoding utf8
+$content = $content.Replace($needle, $replacement)
+
+# 补丁 2：CC/AR/RANLIB 路径统一正斜杠。Windows 宿主上 msys make 经 sh 执行
+# Makefile 配方，反斜杠会被当转义符吞掉（D:\Dev\... → D:Devmise...）；
+# 正斜杠在 cmd 与 sh 下均可执行。
+$ccNeedle = @'
+            let mut cc_env = compiler.cc_env();
+            if cc_env.is_empty() {
+                cc_env = compiler.path().to_path_buf().into_os_string();
+            }
+            configure.env("CC", cc_env);
+'@
+$ccReplacement = @'
+            let mut cc_env = compiler.cc_env();
+            if cc_env.is_empty() {
+                cc_env = compiler.path().to_path_buf().into_os_string();
+            }
+            // HeartShard 补丁：Windows 宿主上 msys make 经 sh 执行 Makefile 配方，
+            // 会把反斜杠路径当转义符吞掉；统一转成正斜杠（cmd 与 sh 均可执行）。
+            let cc_str = cc_env.to_string_lossy().replace('\\', "/");
+            configure.env("CC", cc_str);
+'@
+if (-not $content.Contains($ccNeedle)) {
+    throw "patch anchor not found (CC) in lib.rs - openssl-src version changed; review manually"
+}
+$content = $content.Replace($ccNeedle, $ccReplacement)
+
+$arNeedle = @'
+            let ar = cc.get_archiver();
+            configure.env("AR", ar.get_program());
+'@
+$arReplacement = @'
+            let ar = cc.get_archiver();
+            let ar_str = ar.get_program().to_string_lossy().replace('\\', "/");
+            configure.env("AR", ar_str);
+'@
+if (-not $content.Contains($arNeedle)) {
+    throw "patch anchor not found (AR) in lib.rs - openssl-src version changed; review manually"
+}
+$content = $content.Replace($arNeedle, $arReplacement)
+
+$ranlibNeedle = @'
+            configure.env("RANLIB", args.join(OsStr::new(" ")));
+'@
+$ranlibReplacement = @'
+            let ranlib_str = args
+                .join(OsStr::new(" "))
+                .to_string_lossy()
+                .replace('\\', "/");
+            configure.env("RANLIB", ranlib_str);
+'@
+if (-not $content.Contains($ranlibNeedle)) {
+    throw "patch anchor not found (RANLIB) in lib.rs - openssl-src version changed; review manually"
+}
+$content = $content.Replace($ranlibNeedle, $ranlibReplacement)
+
+Set-Content -Path $lib -Value $content -NoNewline -Encoding utf8
 Write-Output "patched: $lib"

@@ -2,6 +2,7 @@
 // 一键体检）+ 详情模态（分片分布）+ 历史报告重开。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
+import { openPath as openWithSystem } from "@tauri-apps/plugin-opener";
 import {
   api,
   BlobEntry,
@@ -202,9 +203,19 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       const dest = await api.pickSavePath(blob.file_name);
       if (!dest) return;
       await api.exportBlob(blob.blob_hash, dest);
-      toast.success(`已还原并通过 SHA-256 校验`);
+      toast.success(`已还原并通过 SHA-256 校验：${dest}`);
     } catch (e) {
       setError(`导出失败：${String(e)}`);
+    }
+  };
+
+  const doPreview = async (blob: BlobEntry) => {
+    setError(null);
+    try {
+      const result = await api.previewBlob(blob.blob_hash);
+      await openWithSystem(result.path);
+    } catch (e) {
+      setError(`预览失败：${String(e)}`);
     }
   };
 
@@ -305,33 +316,36 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   return (
     <div className="gallery">
       <header className="toolbar">
-        <span className="brand">HeartShard · 牧心相册</span>
-        <span className="storages" title={storages.map((s) => `${s.id} (${s.kind})`).join(", ")}>
-          {healthBadge ?? (storages.length > 0 ? `${storages.length} 个 Storage` : "")}
-        </span>
-        <span className="spacer" />
-        <button onClick={doImport} disabled={importing}>
-          {importing ? "导入中…" : "导入照片 / 视频"}
-        </button>
-        <button onClick={() => setWizardOpen(true)}>导入目录（向导）</button>
-        <button onClick={() => setAlbumTreeOpen(true)}>相册树</button>
-        <button onClick={() => setMapOpen(true)}>地图</button>
-        <button onClick={() => setStorageOpen(true)}>存储</button>
-        <button onClick={() => setSettingsOpen(true)}>设置</button>
-        <button onClick={doSync} disabled={syncing}>
-          {syncing ? "同步中…" : "同步"}
-        </button>
-        <button onClick={doRebalance} disabled={syncing}>
-          再平衡
-        </button>
-        <button onClick={doHealthCheck} disabled={healthChecking}>
-          {healthChecking ? "体检中…" : "一键体检"}
-        </button>
-        <button onClick={openHistory}>历史</button>
-        <button onClick={refresh}>刷新</button>
-        <button onClick={doLock} className="secondary">
-          锁定
-        </button>
+        <div className="toolbar-row">
+          <span className="brand">HeartShard · 牧心相册</span>
+          <span className="storages" title={storages.map((s) => `${s.id} (${s.kind})`).join(", ")}>
+            {healthBadge ?? (storages.length > 0 ? `${storages.length} 个 Storage` : "")}
+          </span>
+        </div>
+        <div className="toolbar-row toolbar-buttons">
+          <button onClick={doImport} disabled={importing}>
+            {importing ? "导入中…" : "导入照片 / 视频"}
+          </button>
+          <button onClick={() => setWizardOpen(true)}>导入目录（向导）</button>
+          <button onClick={() => setAlbumTreeOpen(true)}>相册树</button>
+          <button onClick={() => setMapOpen(true)}>地图</button>
+          <button onClick={() => setStorageOpen(true)}>存储</button>
+          <button onClick={() => setSettingsOpen(true)}>设置</button>
+          <button onClick={doSync} disabled={syncing}>
+            {syncing ? "同步中…" : "同步"}
+          </button>
+          <button onClick={doRebalance} disabled={syncing}>
+            再平衡
+          </button>
+          <button onClick={doHealthCheck} disabled={healthChecking}>
+            {healthChecking ? "体检中…" : "一键体检"}
+          </button>
+          <button onClick={openHistory}>历史</button>
+          <button onClick={refresh}>刷新</button>
+          <button onClick={doLock} className="secondary">
+            锁定
+          </button>
+        </div>
       </header>
 
       {results && (
@@ -398,7 +412,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </div>
       ) : (
         <Virtuoso
-          style={{ height: "calc(100vh - 64px)" }}
+          style={{ height: "calc(100vh - 140px)", paddingTop: 8 }}
           totalCount={items.length}
           itemContent={(index: number) => {
             const item = items[index];
@@ -430,14 +444,17 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                 <div className="blob-actions" onClick={(e) => e.stopPropagation()}>
                   {v && (
                     <span
-                      className={`badge ${v.report.ok ? "ok" : "bad"}`}
-                      title={`shards: ${v.report.shard_count}, missing: ${v.report.missing.length}, corrupted: ${v.report.corrupted.length}`}
+                      className={`badge ${v.report.ok ? "ok" : v.report.degraded ? "warn" : "bad"}`}
+                      title={`shards: ${v.report.shard_count}, 可用: ${v.report.available}, 缺失: ${v.report.missing.length}, 损坏: ${v.report.corrupted.length}`}
                     >
                       {v.report.ok
-                        ? `✔ (${v.report.shard_count} shards)`
-                        : `✘ 缺 ${v.report.missing.length} / 坏 ${v.report.corrupted.length}`}
+                        ? `✔ 健康`
+                        : v.report.degraded
+                          ? `⚠ 降级（${v.report.available}/${v.report.shard_count}）`
+                          : `✘ 不可恢复`}
                     </span>
                   )}
+                  <button onClick={() => doPreview(b)}>预览</button>
                   <button onClick={() => doVerify(b)}>体检</button>
                   <button onClick={() => doRepair(b)}>修复</button>
                   <button onClick={() => doExport(b)}>导出</button>

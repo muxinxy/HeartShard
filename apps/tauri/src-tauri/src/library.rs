@@ -26,8 +26,10 @@ use serde::{Deserialize, Serialize};
 use shard::{encode_blob, ChunkManifestInfo};
 use thiserror::Error;
 
+use crate::storage_ftp::{FtpConfig, FtpStore};
 use crate::storage_openlist::{OpenListConfig, OpenListStore};
 use crate::storage_s3::{S3Config, S3Store};
+use crate::storage_webdav::{WebDavConfig, WebDavStore};
 
 pub const DEFAULT_CHUNK_SIZE: usize = shard::DEFAULT_CHUNK_SIZE; // 1 MiB
 pub const DEFAULT_N: u8 = shard::DEFAULT_N; // 4
@@ -104,7 +106,13 @@ pub enum ImportStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct VerifyReport {
     pub blob_hash: String,
+    /// 全部 shard 健康且 ≥ m 可恢复
     pub ok: bool,
+    /// 可恢复（可用 shard ≥ m）但非全部健康
+    pub degraded: bool,
+    /// 不可恢复（可用 shard < m）
+    pub unrecoverable: bool,
+    pub available: usize,
     pub missing: Vec<String>,
     pub corrupted: Vec<String>,
     pub shard_count: usize,
@@ -151,6 +159,8 @@ pub enum StorageConfig {
     LocalDir { id: String, root: String },
     S3(S3Config),
     OpenList(OpenListConfig),
+    WebDav(WebDavConfig),
+    Ftp(FtpConfig),
 }
 
 impl StorageConfig {
@@ -159,6 +169,8 @@ impl StorageConfig {
             StorageConfig::LocalDir { id, .. } => id.clone(),
             StorageConfig::S3(c) => c.bucket.clone(),
             StorageConfig::OpenList(c) => c.base_url.clone(),
+            StorageConfig::WebDav(c) => c.base_url.clone(),
+            StorageConfig::Ftp(c) => format!("{}:{}", c.host, c.port),
         }
     }
 
@@ -167,6 +179,8 @@ impl StorageConfig {
             StorageConfig::LocalDir { .. } => "local-dir",
             StorageConfig::S3(_) => "s3",
             StorageConfig::OpenList(_) => "openlist",
+            StorageConfig::WebDav(_) => "webdav",
+            StorageConfig::Ftp(_) => "ftp",
         }
     }
 
@@ -177,6 +191,8 @@ impl StorageConfig {
             }
             StorageConfig::S3(c) => Ok(Box::new(S3Store::new(c.clone())?)),
             StorageConfig::OpenList(c) => Ok(Box::new(OpenListStore::new(c.clone())?)),
+            StorageConfig::WebDav(c) => Ok(Box::new(WebDavStore::new(c.clone())?)),
+            StorageConfig::Ftp(c) => Ok(Box::new(FtpStore::new(c.clone())?)),
         }
     }
 }
@@ -967,6 +983,7 @@ impl HeartCore {
         let manifest = self.load_manifest(&blob_hex)?;
         let mut missing = Vec::new();
         let mut corrupted = Vec::new();
+        let mut available = 0usize;
         for s in &manifest.shards {
             let data = self
                 .store_by_id(&s.storage_id)
@@ -977,18 +994,72 @@ impl HeartCore {
                 Some(bytes) => {
                     if bytes.len() as u32 != s.size || hex::encode(crypto::sha256(&bytes)) != s.sha256 {
                         corrupted.push(format!("[{}] {}", s.storage_id, s.remote_key));
+                    } else {
+                        available += 1;
                     }
                 }
             }
         }
         let shard_count = manifest.shards.len();
+        // 体检语义：全健康→ok；可用 ≥ m 可恢复但非全健康→degraded（黄色）；可用 < m→unrecoverable（红色）
+        let ok = missing.is_empty() && corrupted.is_empty();
+        let recoverable = available >= manifest.m as usize;
         Ok(VerifyReport {
             blob_hash: blob_hex,
-            ok: missing.is_empty() && corrupted.is_empty(),
+            ok,
+            degraded: !ok && recoverable,
+            unrecoverable: !recoverable,
             missing,
             corrupted,
             shard_count,
+            available,
         })
+    }
+
+    /// §10 点击预览：解密 blob → 写入临时文件 → 返回路径和 MIME。
+    pub fn preview_blob(&self, blob_hash: &str) -> Result<(PathBuf, String), LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let blob_hex = blob_hash.to_lowercase();
+        let manifest = self.load_manifest(&blob_hex)?;
+        let blob_hash_bytes: [u8; 32] = decode_hash(&manifest.blob_sha256)?;
+        let blob_key = keys.blob_key(&blob_hash_bytes)?;
+
+        let mut chunk_infos = Vec::with_capacity(manifest.chunks.len());
+        for c in &manifest.chunks {
+            chunk_infos.push(ChunkManifestInfo {
+                plaintext_sha256: decode_hash(&c.plaintext_sha256)?,
+                ciphertext_len: c.ciphertext_len as usize,
+            });
+        }
+
+        let decoded = shard::decode_blob(
+            &blob_hash_bytes,
+            &blob_key,
+            &chunk_infos,
+            manifest.n,
+            manifest.m,
+            |chunk_index, shard_index| {
+                let shard = manifest.shards.iter().find(|s| {
+                    s.chunk_index == chunk_index && s.shard_index == shard_index
+                })?;
+                let store = self.store_by_id(&shard.storage_id).ok()?;
+                store.get(&shard.remote_key)
+            },
+        )?;
+
+        if crypto::sha256(&decoded) != blob_hash_bytes {
+            return Err(LibError::Data("SHA-256 mismatch".into()));
+        }
+
+        let ext = manifest
+            .file_name
+            .rsplit('.')
+            .next()
+            .unwrap_or("bin");
+        let tmp = std::env::temp_dir()
+            .join(format!("heartshard-preview-{}.{}", &blob_hex[..12], ext));
+        fs::write(&tmp, &decoded)?;
+        Ok((tmp, manifest.mime.clone()))
     }
 
     pub fn sync_now(&self) -> Result<SyncOutcome, LibError> {
@@ -1039,6 +1110,30 @@ impl HeartCore {
             return Err(LibError::Data(format!("storage {id} already registered")));
         }
         self.storages.push(StorageConfig::OpenList(config));
+        self.save_registry(&keys)?;
+        Ok(id)
+    }
+
+    /// 注册 WebDAV Storage（nginx dav / Nextcloud / Alist 等；Basic 认证）。
+    pub fn add_storage_webdav(&mut self, config: WebDavConfig) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let id = config.base_url.clone();
+        if self.storages.iter().any(|s| s.id() == id) {
+            return Err(LibError::Data(format!("storage {id} already registered")));
+        }
+        self.storages.push(StorageConfig::WebDav(config));
+        self.save_registry(&keys)?;
+        Ok(id)
+    }
+
+    /// 注册 FTPS Storage（明文 FTP 默认禁用——凭据明文传输，仅限可信内网）。
+    pub fn add_storage_ftp(&mut self, config: FtpConfig) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?.clone();
+        let id = format!("{}:{}", config.host, config.port);
+        if self.storages.iter().any(|s| s.id() == id) {
+            return Err(LibError::Data(format!("storage {id} already registered")));
+        }
+        self.storages.push(StorageConfig::Ftp(config));
         self.save_registry(&keys)?;
         Ok(id)
     }
@@ -1099,9 +1194,19 @@ impl HeartCore {
                     .iter()
                     .find(|s| s.chunk_index == chunk_index && s.shard_index == shard_index)
                     .ok_or_else(|| LibError::Data("manifest shard missing".into()))?;
-                let store = self.store_by_id(&s.storage_id)?;
-                store.put(&s.remote_key, &parts[usize::from(shard_index)])?;
-                repaired.push(format!("[{}] {}", s.storage_id, s.remote_key));
+                // 写到任意一个**当前可用**的 Storage（原存储可能已移除）
+                let mut written = false;
+                for cfg in &self.storages {
+                    let store = cfg.store()?;
+                    if store.put(&s.remote_key, &parts[usize::from(shard_index)]).is_ok() {
+                        repaired.push(format!("[{}] {}", cfg.id(), s.remote_key));
+                        written = true;
+                        break;
+                    }
+                }
+                if !written {
+                    unrecoverable.push(chunk_index);
+                }
             }
         }
 

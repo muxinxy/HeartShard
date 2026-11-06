@@ -167,12 +167,19 @@ scoop install msys2                        # SQLCipher → OpenSSL 交叉编译�
 & 'D:\Scoop\apps\msys2\current\usr\bin\bash.exe' -lc 'pacman -Sy perl --noconfirm'
 ```
 
-关键坑位记录（2026-11-02 实战）：
+关键坑位记录（2026-11-02 实战；2026-11-07 补充 4-6）：
 1. **openssl 交叉编译拒绝 MSWin32 perl**（strawberry 报"doesn't produce Unix like paths"）→
    必须用 MSYS2 的 `/usr/bin/perl`；
 2. **`ANDROID_NDK_ROOT` 必须显式设置**（openssl 的 android Configure 靠它定位工具链，
    只有 `NDK_HOME` 不够）；
-3. Windows 与 Android 构建不要并发（共享 `pnpm build` 的 dist/ 会互相踩）。
+3. Windows 与 Android 构建不要并发（共享 `pnpm build` 的 dist/ 会互相踩）；
+4. **PATH 需前置 MSYS2 `usr\bin`**（openssl 构建需要 GNU make；scoop 的 make shim 是
+   BusyBox，不行）；
+5. **msys sh 吞反斜杠**：msys make 找到 sh.exe 后用 sh 执行 Makefile 配方，
+   `D:\Dev\...` 会被吃成 `D:Devmise...` → `patches/openssl-src` 的补丁 2 把
+   CC/AR/RANLIB 统一转成正斜杠（由 `patches\setup-android-openssl.ps1` 自动打上）；
+6. **tauri CLI 会覆盖 shell 里的 CC/AR 环境**（按自己的 NDK 探测结果设置），
+   所以正斜杠只能在 openssl-src 构建脚本内部转换，外部传 env 无效。
 
 ```powershell
 cd apps\tauri

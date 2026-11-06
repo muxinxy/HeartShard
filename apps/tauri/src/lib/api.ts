@@ -29,9 +29,17 @@ export interface BlobEntry {
 export interface VerifyReport {
   blob_hash: string;
   ok: boolean;
+  degraded: boolean;
+  unrecoverable: boolean;
+  available: number;
   missing: string[];
   corrupted: string[];
   shard_count: number;
+}
+
+export interface PreviewResult {
+  path: string;
+  mime: string;
 }
 
 export interface SyncOutcome {
@@ -168,7 +176,12 @@ export const api = {
     invoke<string>("add_storage_s3", { config }),
   addStorageOpenList: (config: Record<string, unknown>) =>
     invoke<string>("add_storage_openlist", { config }),
+  addStorageWebdav: (config: Record<string, unknown>) =>
+    invoke<string>("add_storage_webdav", { config }),
+  addStorageFtp: (config: Record<string, unknown>) =>
+    invoke<string>("add_storage_ftp", { config }),
   removeStorage: (id: string) => invoke<void>("remove_storage", { id }),
+  previewBlob: (blobHash: string) => invoke<PreviewResult>("preview_blob", { blobHash }),
   serviceStart: () => invoke<void>("service_start"),
   serviceStop: () => invoke<void>("service_stop"),
   rebalanceAll: () => invoke<RebalanceReport>("rebalance_all"),

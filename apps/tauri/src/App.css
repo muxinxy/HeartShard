@@ -153,6 +153,9 @@ h1, h2, h3 { color: var(--foreground); }
   flex-wrap: wrap;
 }
 
+.toolbar-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.toolbar-buttons { flex-wrap: wrap; row-gap: 8px; }
+
 .brand { font-weight: 700; font-size: 17px; letter-spacing: 0.02em; }
 
 .storages { margin-left: 10px; color: var(--muted-foreground); font-size: 13px; }
@@ -239,6 +242,7 @@ h1, h2, h3 { color: var(--foreground); }
 }
 
 .badge.ok { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.badge.warn { color: #f0b45c; background: rgba(240, 180, 92, 0.12); }
 .badge.bad { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 12%, transparent); }
 
 /* ---------- 缩略图 ---------- */

@@ -346,8 +346,41 @@ pub fn add_storage_openlist(
 }
 
 #[tauri::command]
+pub fn add_storage_webdav(
+    config: crate::storage_webdav::WebDavConfig,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state.core.lock().unwrap().add_storage_webdav(config).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn add_storage_ftp(
+    config: crate::storage_ftp::FtpConfig,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state.core.lock().unwrap().add_storage_ftp(config).map_err(err_str)
+}
+
+#[tauri::command]
 pub fn remove_storage(id: String, state: State<'_, SessionState>) -> Result<(), String> {
     state.core.lock().unwrap().remove_storage(&id).map_err(err_str)
+}
+
+/// §10 点击预览：解密 blob → 临时文件 → 返回 (路径, MIME)。
+#[tauri::command]
+pub fn preview_blob(
+    blob_hash: String,
+    state: State<'_, SessionState>,
+) -> Result<PreviewResult, String> {
+    let core = state.core.lock().unwrap();
+    let (path, mime) = core.preview_blob(&blob_hash).map_err(err_str)?;
+    Ok(PreviewResult { path: path.to_string_lossy().to_string(), mime })
+}
+
+#[derive(Serialize)]
+pub struct PreviewResult {
+    pub path: String,
+    pub mime: String,
 }
 
 /// 构造数据目录：便携模式 → exe 同目录 data/（无 app_data_dir 依赖）。
