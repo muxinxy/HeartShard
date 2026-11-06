@@ -27,7 +27,7 @@ Built for privacy-sensitive users who want their photos on multiple drives / NAS
 | **M3** | **Android** Tauri shell (aarch64 APK) + WebDAV adapter + background transfer | ✅ Done (shell/WebDAV/foreground service; §8.5 five-phase wizard UI + import_staging resume implemented) |
 | **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | OpenList adapter ✅ (mock covers all endpoints; live-instance acceptance pending); HarmonyOS shell ⚠️ requires DevEco/OHOS SDK (unavailable here), see [dev guide](docs/development.en.md) |
 | **M5** | iOS + FTP/FTPS + repair/rebalance + threat-model document | Repair ✅, rebalance ✅, FTP/FTPS ✅ (live acceptance pending), [threat model](docs/threat-model.md) ✅; iOS ❌ requires macOS |
-| **Artifacts** | Windows portable exe + installers; Android APK (aarch64) | ✅ Four artifacts in `dist/` + §12.2 scenarios E2E green |
+| **Artifacts** | Windows portable exe; Android APK (aarch64) | ✅ Two artifacts in `dist/` + §12.2 scenarios E2E green |
 
 > Platform priority (adjusted 2026-11-01): **Windows → Android first**; iOS and HarmonyOS follow.
 > Remaining honest gaps: task center / virtual-scrolled timeline / map views (rest of §10 UI),

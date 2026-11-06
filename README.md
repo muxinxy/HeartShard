@@ -31,7 +31,7 @@ HeartShard 是一个**纯客户端、无后端、端到端加密**的多云相�
 | **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | 修复 ✅、再平衡 ✅、FTP/FTPS ✅（真实服务验收待端点）、[威胁模型](docs/threat-model.md) ✅；iOS ❌ 需 macOS |
 | **§10 UI** | 时间线虚拟滚动（Virtuoso）+ 懒加载缩略图（加密缓存）+ 详情页（EXIF 解析 + 分片分布可视化）+ 一键体检 + 任务中心 + 历史报告重开 + 地图视图（leaflet OSM）+ 大图预览 + 浅色/深色主题 + 相册树（拖拽排序/封面设置） | ✅ 完成 |
 | **§11** | 缩略图本地生成并加密缓存 + 下载 Range 支持 | ✅ 完成（manifest_key 加密缓存 + heartshard-video:// 协议 Range 流式播放） |
-| **产物** | Windows 便携 exe + 安装包；Android APK（aarch64） | ✅ `dist/` 下四件（见上）+ §12.2 三场景 E2E 全绿 |
+| **产物** | Windows 便携 exe；Android APK（aarch64） | ✅ `dist/` 下两件 + §12.2 三场景 E2E 全绿 |
 
 > 平台优先级（2026-11-01 调整）：**Windows → Android 优先**，iOS 与鸿蒙随后。
 > 剩余如实声明的缺口：增量同步 delta 传输压缩、各协议真实端点验收。

@@ -148,15 +148,13 @@ Each milestone ends with: runnable commands, known platform limitations, next-mi
 
 ## 8. Build & Release (Artifacts)
 
-### 8.1 Windows (portable exe + installers)
+### 8.1 Windows (portable exe, no installers)
 
 ```powershell
 cd apps\tauri
 pnpm tauri build
-# Artifacts:
-#   src-tauri\target\release\HeartShard.exe                    ← portable single file
-#   src-tauri\target\release\bundle\nsis\HeartShard_0.1.0_x64-setup.exe
-#   src-tauri\target\release\bundle\msi\HeartShard_0.1.0_x64_en-US.msi
+# Artifact:
+#   target\release\heartshard-tauri.exe    ← portable single file (rename to HeartShard.exe to distribute)
 ```
 
 ### 8.2 Android (APK, aarch64)

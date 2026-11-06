@@ -148,15 +148,13 @@ Rust 同上断言
 
 ## 8. 构建/发布（产物）
 
-### 8.1 Windows（便携 exe + 安装包）
+### 8.1 Windows（便携 exe，不构建安装程序）
 
 ```powershell
 cd apps\tauri
 pnpm tauri build
 # 产物：
-#   src-tauri\target\release\HeartShard.exe                    ← 便携单文件
-#   src-tauri\target\release\bundle\nsis\HeartShard_0.1.0_x64-setup.exe
-#   src-tauri\target\release\bundle\msi\HeartShard_0.1.0_x64_en-US.msi
+#   target\release\heartshard-tauri.exe    ← 便携单文件（重命名为 HeartShard.exe 即可分发）
 ```
 
 ### 8.2 Android（APK，aarch64）
