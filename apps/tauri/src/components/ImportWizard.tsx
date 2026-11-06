@@ -86,7 +86,7 @@ export function ImportWizard({ onDone }: { onDone: () => void }) {
 
       {phase === "pick" && (
         <div className="empty">
-          <p>选择一个目录，其层级将成为加密索引中的相册树（§8.2）。</p>
+          <p>选择一个目录，其层级将成为加密索引中的相册树。</p>
           <p className="hint">云存储上只会出现打散的对象键；目录名不会上传。</p>
           <button onClick={pickAndScan}>选择目录并扫描</button>
         </div>
@@ -100,7 +100,7 @@ export function ImportWizard({ onDone }: { onDone: () => void }) {
           </h2>
           {preview.already_in_index > 0 && (
             <p className="hint">
-              其中 {preview.already_in_index} 个文件已在索引中，将跳过上传（§8.4）。
+              其中 {preview.already_in_index} 个文件已在索引中，将跳过上传。
             </p>
           )}
           {preview.truncated.length > 0 && (

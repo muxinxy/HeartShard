@@ -21,6 +21,7 @@ import { MapView } from "./MapView";
 import { SettingsPage } from "./SettingsPage";
 import { Thumb } from "./Thumb";
 import { TaskPanel, TaskProvider, useTasks } from "./TaskPanel";
+import { useToast } from "./Toast";
 
 interface VerifyState {
   report: VerifyReport;
@@ -35,6 +36,7 @@ interface HealthSummary {
 }
 
 export function Gallery({ onLock }: { onLock: () => void }) {
+  const toast = useToast();
   const tasks = useTasks();
   const [blobs, setBlobs] = useState<BlobEntry[]>([]);
   const [importing, setImporting] = useState(false);
@@ -121,11 +123,11 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       const r = await api.rebalanceAll();
       tasks.finish(taskId, "done", `迁移 ${r.moved} 个 shard`);
       if (r.moved > 0) {
-        alert(`再平衡完成：检查 ${r.blobs_checked} 个 blob，迁移 ${r.moved} 个 shard。`);
+        toast.success(`再平衡完成：迁移 ${r.moved} 个 shard`);
       } else if (r.failed.length > 0) {
-        alert(`再平衡发现无法搬迁的 shard：\n${r.failed.join("\n")}`);
+        toast.error(`${r.failed.length} 个 shard 无法搬迁，请先体检+修复`);
       } else {
-        alert(`再平衡完成：检查 ${r.blobs_checked} 个 blob，布局已符合策略。`);
+        toast.info(`再平衡完成：布局已符合策略`);
       }
       await refresh();
     } catch (e) {
@@ -178,11 +180,11 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         report.unrecoverable.length > 0 ? "健康 shard 不足" : `修复 ${report.repaired.length} 个 shard`
       );
       if (report.repaired.length > 0) {
-        alert(`已修复 ${report.repaired.length} 个 shard：\n${report.repaired.join("\n")}`);
+        toast.success(`已修复 ${report.repaired.length} 个 shard`);
       } else if (report.unrecoverable.length > 0) {
-        alert(`chunk ${report.unrecoverable.join(", ")} 损坏过重，无法自动修复。`);
+        toast.error(`chunk ${report.unrecoverable.join(", ")} 损坏过重，无法自动修复`);
       } else {
-        alert("一切正常，无需修复。");
+        toast.info("一切正常，无需修复。");
       }
       const after = await api.verifyBlob(blob.blob_hash);
       setVerify((prev) => ({ ...prev, [blob.blob_hash]: { report: after, at: Date.now() } }));
@@ -198,7 +200,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       const dest = await api.pickSavePath(blob.file_name);
       if (!dest) return;
       await api.exportBlob(blob.blob_hash, dest);
-      alert(`已还原并通过 SHA-256 校验：\n${dest}`);
+      toast.success(`已还原并通过 SHA-256 校验`);
     } catch (e) {
       setError(`导出失败：${String(e)}`);
     }

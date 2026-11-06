@@ -35,31 +35,31 @@ pub const DEFAULT_M: u8 = shard::DEFAULT_M; // 2
 
 #[derive(Debug, Error)]
 pub enum LibError {
-    #[error("io: {0}")]
+    #[error("文件读写错误: {0}")]
     Io(#[from] std::io::Error),
-    #[error("crypto: {0}")]
+    #[error("加密解密失败: {0}")]
     Crypto(#[from] CryptoError),
-    #[error("shard: {0}")]
+    #[error("分片处理失败: {0}")]
     Shard(#[from] shard::ShardError),
-    #[error("ida: {0}")]
-    Ida(#[from] ida::IdaError),
-    #[error("keypath: {0}")]
+    #[error("存储路径错误: {0}")]
     Keypath(#[from] keypath::KeypathError),
-    #[error("index: {0}")]
-    Index(#[from] index::IndexError),
-    #[error("store: {0}")]
-    Store(#[from] index::store::StoreError),
-    #[error("json: {0}")]
+    #[error("数据序列化失败: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("session is locked; unlock first")]
+    #[error("索引操作失败: {0}")]
+    Index(#[from] index::IndexError),
+    #[error("存储访问失败: {0}")]
+    Store(#[from] index::store::StoreError),
+    #[error("纠删码处理失败: {0}")]
+    Ida(#[from] ida::IdaError),
+    #[error("请先解锁")]
     Locked,
-    #[error("blob {0} not found in index")]
+    #[error("blob {0} 不在索引中")]
     BlobNotFound(String),
-    #[error("manifest for blob {0} is missing or unreadable")]
+    #[error("manifest 缺失或不可读: {0}")]
     ManifestMissing(String),
-    #[error("data error: {0}")]
+    #[error("数据错误: {0}")]
     Data(String),
-    #[error("chunk {0}: shards present but cannot be decoded/decrypted")]
+    #[error("chunk {0} 无法解码/解密")]
     ChunkCorrupted(u32),
 }
 
@@ -402,7 +402,7 @@ impl HeartCore {
             Err(index::IndexError::Sqlite(e)) if e.to_string().contains("not a database") => {
                 self.keys = None;
                 return Err(LibError::Data(
-                    "wrong password (index decryption failed)".into(),
+                    "口令错误（索引解密失败）".into(),
                 ));
             }
             Err(e) => return Err(e.into()),

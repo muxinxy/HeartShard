@@ -315,12 +315,13 @@ pub fn storage_status(state: State<'_, SessionState>) -> Result<Vec<StorageStatu
     state.core.lock().unwrap().storage_status().map_err(err_str)
 }
 
-/// 构造生产环境的数据目录（app data dir）。
-pub fn resolve_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("cannot resolve app data dir: {e}"))?;
+/// 构造数据目录：便携模式 → exe 同目录 data/（无 app_data_dir 依赖）。
+pub fn resolve_data_dir(_app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("cannot resolve exe path: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or("exe has no parent")?
+        .join("data");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create data dir: {e}"))?;
     Ok(dir)
 }
