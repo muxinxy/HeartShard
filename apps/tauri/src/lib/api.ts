@@ -162,6 +162,13 @@ export const api = {
   syncNow: () => invoke<SyncOutcome>("sync_now"),
   repairBlob: (blobHash: string) => invoke<RepairReport>("repair_blob", { blobHash }),
   storageStatus: () => invoke<StorageStatus[]>("storage_status"),
+  addStorageLocal: (id: string, root: string) =>
+    invoke<string>("add_storage_local", { id, root }),
+  addStorageS3: (config: Record<string, unknown>) =>
+    invoke<string>("add_storage_s3", { config }),
+  addStorageOpenList: (config: Record<string, unknown>) =>
+    invoke<string>("add_storage_openlist", { config }),
+  removeStorage: (id: string) => invoke<void>("remove_storage", { id }),
   serviceStart: () => invoke<void>("service_start"),
   serviceStop: () => invoke<void>("service_stop"),
   rebalanceAll: () => invoke<RebalanceReport>("rebalance_all"),

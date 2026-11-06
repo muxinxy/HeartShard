@@ -315,6 +315,41 @@ pub fn storage_status(state: State<'_, SessionState>) -> Result<Vec<StorageStatu
     state.core.lock().unwrap().storage_status().map_err(err_str)
 }
 
+#[tauri::command]
+pub fn add_storage_local(
+    id: String,
+    root: String,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state
+        .core
+        .lock()
+        .unwrap()
+        .add_storage_local(&id, &root)
+        .map_err(err_str)
+}
+
+#[tauri::command]
+pub fn add_storage_s3(
+    config: crate::storage_s3::S3Config,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state.core.lock().unwrap().add_storage_s3(config).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn add_storage_openlist(
+    config: crate::storage_openlist::OpenListConfig,
+    state: State<'_, SessionState>,
+) -> Result<String, String> {
+    state.core.lock().unwrap().add_storage_openlist(config).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn remove_storage(id: String, state: State<'_, SessionState>) -> Result<(), String> {
+    state.core.lock().unwrap().remove_storage(&id).map_err(err_str)
+}
+
 /// 构造数据目录：便携模式 → exe 同目录 data/（无 app_data_dir 依赖）。
 pub fn resolve_data_dir(_app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("cannot resolve exe path: {e}"))?;

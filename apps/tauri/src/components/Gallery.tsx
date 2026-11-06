@@ -19,6 +19,7 @@ import { ImportWizard } from "./ImportWizard";
 import { AlbumTree } from "./AlbumTree";
 import { MapView } from "./MapView";
 import { SettingsPage } from "./SettingsPage";
+import { StoragePage } from "./StoragePage";
 import { Thumb } from "./Thumb";
 import { TaskPanel, TaskProvider, useTasks } from "./TaskPanel";
 import { useToast } from "./Toast";
@@ -50,6 +51,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
   const [albumTreeOpen, setAlbumTreeOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [detailBlob, setDetailBlob] = useState<BlobEntry | null>(null);
@@ -274,6 +276,17 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     );
   }
 
+  if (storageOpen) {
+    return (
+      <StoragePage
+        onDone={() => {
+          setStorageOpen(false);
+          refresh();
+        }}
+      />
+    );
+  }
+
   if (albumTreeOpen) {
     return (
       <AlbumTree
@@ -303,6 +316,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         <button onClick={() => setWizardOpen(true)}>导入目录（向导）</button>
         <button onClick={() => setAlbumTreeOpen(true)}>相册树</button>
         <button onClick={() => setMapOpen(true)}>地图</button>
+        <button onClick={() => setStorageOpen(true)}>存储</button>
         <button onClick={() => setSettingsOpen(true)}>设置</button>
         <button onClick={doSync} disabled={syncing}>
           {syncing ? "同步中…" : "同步"}
