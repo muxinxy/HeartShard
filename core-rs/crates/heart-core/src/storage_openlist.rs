@@ -66,19 +66,6 @@ struct ListData {
     content: Vec<ListEntry>,
 }
 
-#[derive(Serialize)]
-struct ListReq {
-    path: String,
-    page: u32,
-    per_page: u32,
-}
-
-#[derive(Serialize)]
-struct RemoveReq {
-    dir: String,
-    names: Vec<String>,
-}
-
 impl OpenListStore {
     pub fn new(config: OpenListConfig) -> Result<Self, StoreError> {
         let client = reqwest::blocking::Client::builder()

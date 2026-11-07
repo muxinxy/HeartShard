@@ -179,7 +179,7 @@ pub async fn create_album(State(state): S, headers: HeaderMap, Json(req): Json<C
     if req.name.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "相册名不能为空");
     }
-    let mut core = state.core.lock().unwrap();
+    let core = state.core.lock().unwrap();
     // 父相册需要 manage；建根相册仅 admin
     let perm_ok = match &req.parent_id {
         None => user.is_admin,
@@ -512,7 +512,7 @@ pub async fn run_sync(State(state): S, headers: HeaderMap) -> Response {
             }));
         }
         // 发布增量
-        let mut core = state2.core.lock().unwrap();
+        let core = state2.core.lock().unwrap();
         core.sync_now().map_err(|e| e.to_string())?;
         Ok::<_, String>(out)
     })
@@ -543,7 +543,7 @@ pub async fn set_acl(
         Ok(u) => u,
         Err(e) => return e,
     };
-    let mut core = state.core.lock().unwrap();
+    let core = state.core.lock().unwrap();
     let parents = match parent_map(&core) {
         Ok(p) => p,
         Err(e) => return e,
@@ -589,7 +589,6 @@ pub async fn get_acl(State(state): S, headers: HeaderMap, AxumPath(album_id): Ax
 
 pub fn router() -> axum::Router<Arc<AppState>> {
     use axum::routing::{get, post};
-    use axum::Router as R;
     axum::Router::new()
         .route("/", get(|| async { Html(include_str!("webapp/index.html")) }))
         .route("/app.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/app.js")) }))

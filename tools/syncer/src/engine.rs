@@ -271,7 +271,6 @@ fn uuid_like() -> String {
 
 pub fn sync_source(core: &mut HeartCore, src: &SourceConfig, full: bool) -> Res<Report> {
     let strategy_mirror = src.strategy == "mirror";
-    let delete_trash = src.delete_mode == "trash";
 
     let data_dir = core.data_dir();
     let syncer_dir = data_dir.join("syncer");
@@ -288,14 +287,6 @@ pub fn sync_source(core: &mut HeartCore, src: &SourceConfig, full: bool) -> Res<
         _ => scan_remote(src)?,
     };
     let scanned_keys: HashSet<&str> = scan.iter().map(|s| s.key.as_str()).collect();
-
-    // 现有索引 blob 哈希集合（跨源去重）
-    let known_hashes: HashSet<String> = core
-        .list_blobs()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|b| b.blob_hash)
-        .collect();
 
     let mut albums = AlbumIndex::load(core)?;
     let tmp_dir = std::env::temp_dir().join("heartshard-syncer");
@@ -418,16 +409,7 @@ pub fn sync_source(core: &mut HeartCore, src: &SourceConfig, full: bool) -> Res<
             if old.blob_hash != Some(blob_hash.clone()) {
                 if let Some(old_hash) = &old.blob_hash {
                     if old_hash != &blob_hash {
-                        if let Some(id) = core
-                            .list_albums()
-                            .ok()
-                            .and_then(|all| {
-                                albums
-                                    .by_path
-                                    .get(&old.album_path)
-                                    .cloned()
-                            })
-                        {
+                        if let Some(id) = albums.by_path.get(&old.album_path).cloned() {
                             let _ = core.album_remove_blob(&id, old_hash);
                         }
                         let _ = core.delete_blob(old_hash); // 回收站（可恢复）

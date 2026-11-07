@@ -204,15 +204,6 @@ struct StorageRegistry {
     storages: Vec<StorageConfig>,
 }
 
-/// KDF 参数文件（非机密：盐与参数可落盘；口令与 MK 不落盘）。
-#[derive(Debug, Serialize, Deserialize)]
-struct KdfParamsFile {
-    salt_hex: String,
-    m_cost_kib: u32,
-    t_cost: u32,
-    parallelism: u32,
-}
-
 /// MK 封装文件（§10 修改口令=重加密封装，不重传 shard）：
 /// `wrapped = encrypt_bare(KEK, iv, MK(32B) ‖ master_salt(32B))`，
 /// KEK = Argon2id(口令, kdf_salt)。子密钥全部从 MK 派生 → 改口令只重写本文件。
@@ -308,10 +299,6 @@ impl HeartCore {
             storages: Vec::new(),
             settings: Settings::default(),
         }
-    }
-
-    fn kdf_params_path(&self) -> PathBuf {
-        self.data_dir.join("kdf.params.json")
     }
 
     fn mk_wrap_path(&self) -> PathBuf {
@@ -816,12 +803,7 @@ impl HeartCore {
 
         for ci in first_chunk..=last_chunk {
             let ci = ci as u32;
-            let info = &manifest.chunks[ci as usize];
-            let ct_len = info.ciphertext_len as usize;
-            let chunk_infos = [ChunkManifestInfo {
-                plaintext_sha256: decode_hash(&info.plaintext_sha256)?,
-                ciphertext_len: ct_len,
-            }];
+            let ct_len = manifest.chunks[ci as usize].ciphertext_len as usize;
             let mut available: Vec<(u8, Vec<u8>)> = Vec::new();
             for s in manifest.shards.iter().filter(|s| s.chunk_index == ci) {
                 if let Some(store) = self.store_by_id(&s.storage_id).ok() {
@@ -2373,7 +2355,7 @@ impl HeartCore {
                     let album_id = album_dir
                         .as_ref()
                         .and_then(|d| album_ids.get(d).cloned());
-                    self.finalize_import_file(&keys, db, &me, &row, &encoded, &blob_hex, album_id, &exif_data)?;
+                    self.finalize_import_file(db, &me, &row, &encoded, &blob_hex, album_id, &exif_data)?;
                     if let Some(png) = thumb {
                         let _ = self.thumbnail_cache_put(&blob_hex, &png);
                     }
@@ -2425,7 +2407,6 @@ impl HeartCore {
     #[allow(clippy::too_many_arguments)]
     fn finalize_import_file(
         &self,
-        keys: &crypto::DerivedKeys,
         db: &index::sqlite::IndexDb,
         me: &str,
         row: &index::sqlite::StagingRow,
@@ -2468,7 +2449,6 @@ impl HeartCore {
         };
         self.save_manifest(blob_hex, &manifest)?;
 
-        let blob_sha256: [u8; 32] = decode_hash(blob_hex)?;
         let lamport = db.lamport()? + 1;
         db.upsert_blob(&Versioned {
             lamport,

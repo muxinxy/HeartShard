@@ -90,7 +90,7 @@ fn main() {
                                 Err(e) => eprintln!("[sync {}] 失败: {e}", src.id),
                             }
                         }
-                        let mut core = st.core.lock().unwrap();
+                        let core = st.core.lock().unwrap();
                         let _ = core.sync_now();
                     })
                     .await;

@@ -26,7 +26,3 @@ shard = { path = "../shard" }
 keypath = { path = "../keypath" }
 ida = { path = "../ida" }
 index = { path = "../index" }
-
-# 本地补丁：android 目标强制 no-asm（见 patches/openssl-src/src/lib.rs 注释）
-[patch.crates-io]
-openssl-src = { path = "../../../patches/openssl-src" }

@@ -15,6 +15,10 @@ edition = "2024"
 license = "MIT"
 authors = ["HeartShard contributors"]
 
+[patch.crates-io]
+# android 目标 no-asm（详见 patches/setup-android-openssl.ps1）
+openssl-src = { path = "../patches/openssl-src" }
+
 [workspace.dependencies]
 # crypto primitives (RustCrypto)
 aes = "0.8"
