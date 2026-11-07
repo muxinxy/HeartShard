@@ -16,6 +16,7 @@ patches/openssl-src/
 
 # 牧心后台运行时数据（含登录口令/用户/ACL/分享缓存）
 server/server.toml
+server/sources.json
 server/users.json
 server/groups.json
 server/acls.json
