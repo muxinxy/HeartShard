@@ -310,6 +310,18 @@ API（Bearer token，登录获得）：
 （地点相册/类型分类）+ 全平台动态照片（Android motion photo / Apple Live Photo，
 HEIC 解码为最大风险项）。
 
+### 7.6.3 MT Photos 风格补全（2026-11-07，参照 mtmt.tech 功能特性清单）
+
+- `favicon.ico`/`favicon.svg` 内嵌站点图标（修 404）。
+- **探索页**：按类型（照片/视频卡片 → 过滤网格）；按地点（EXIF GPS 聚类，坐标
+  保留 1 位小数 ≈ 11km 网格分组，卡片点击进过滤网格）。人脸/场景相册属 AI 能力，
+  不在当前范围。
+- **收藏夹**页（favorite 过滤网格）。
+- **头像下拉菜单**：修改密码（`POST /api/me/password`，校验旧口令；UserStore 加
+  `change_own_password`）、切换深浅色、退出登录。
+- `server/build.rs`：编译期对 `app.js`/`sw.js` 跑 `node --check`——前端语法错误
+  在编译期拦截（M5a 曾因模板字符串少闭合导致整个 PWA 脚本失效）。
+
 ## 8. 构建/发布（产物）
 
 ### 8.1 Windows（便携 exe，不构建安装程序）

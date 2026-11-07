@@ -15,6 +15,13 @@ pub struct User {
     pub password_hash: String,
     #[serde(default)]
     pub is_admin: bool,
+    /// 是否启用（禁用 = 不能登录 + 会话吊销；默认启用，兼容旧 users.json）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -81,19 +88,21 @@ impl UserStore {
             name: name.trim().to_string(),
             password_hash: hash_password(password)?,
             is_admin,
+            enabled: true,
         };
         self.users.push(user.clone());
         self.save_users()?;
         Ok(user)
     }
 
-    /// 修改用户：口令（重哈希）/ 显示名 / admin 标记；None 表示不改。
+    /// 修改用户：口令（重哈希）/ 显示名 / admin / enabled；None 表示不改。
     pub fn update_user(
         &mut self,
         uid: &str,
         password: Option<&str>,
         name: Option<&str>,
         is_admin: Option<bool>,
+        enabled: Option<bool>,
     ) -> Result<(), String> {
         let user_idx = self
             .users
@@ -122,6 +131,16 @@ impl UserStore {
                 return Err("至少保留一个管理员".into());
             }
             self.users[user_idx].is_admin = a;
+        }
+        if let Some(en) = enabled {
+            self.users[user_idx].enabled = en;
+            if !en {
+                // 禁用即吊销该用户全部会话
+                self.sessions
+                    .lock()
+                    .unwrap()
+                    .retain(|_, v| v != uid);
+            }
         }
         self.save_users()
     }
@@ -191,6 +210,7 @@ impl UserStore {
                     name: u.name.clone(),
                     password_hash: hash,
                     is_admin: u.admin,
+                    enabled: true,
                 }),
             }
         }
@@ -248,7 +268,7 @@ impl UserStore {
         self.save_users()
     }
 
-    /// 登录：校验口令，签发会话 token。
+    /// 登录：校验口令，签发会话 token（禁用账户拒绝）。
     pub fn login(&self, name: &str, password: &str) -> Result<(String, User), String> {
         let uid = uid_for(name);
         let user = self
@@ -256,6 +276,9 @@ impl UserStore {
             .iter()
             .find(|u| u.uid == uid)
             .ok_or("用户不存在或口令错误")?;
+        if !user.enabled {
+            return Err("该账户已被禁用".into());
+        }
         if !verify_password(password, &user.password_hash) {
             return Err("用户不存在或口令错误".into());
         }

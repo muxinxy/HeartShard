@@ -84,9 +84,16 @@ table.admin th { color: var(--muted); font-weight: 500; }
 .modal .close { float: right; background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
 
 /* ---------- 灯箱 ---------- */
-#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; z-index: 120; }
-#viewer img { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%; }
-#viewer .close { position: absolute; top: 14px; right: 16px; z-index: 2; }
+#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; z-index: 120; flex-direction: column; }
+#lb-bar { display: flex; align-items: center; gap: 8px; padding: 12px 18px; color: #ddd; flex-shrink: 0; }
+#lb-bar button { background: none; border: 1px solid #444; color: #ddd; padding: 7px 13px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+#lb-bar button:hover { border-color: #888; }
+#lb-stage { flex: 1; display: grid; place-items: center; overflow: hidden; cursor: grab; }
+#full-img { max-width: 96%; max-height: 100%; user-select: none; transform-origin: center center; }
+#lb-tools { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(30,32,38,.9); border: 1px solid #3a3d45; border-radius: 12px; padding: 6px; }
+#lb-tools button { background: none; border: none; color: #ddd; font-size: 17px; width: 40px; height: 34px; border-radius: 8px; cursor: pointer; }
+#lb-tools button:hover { background: rgba(255,255,255,.12); }
+.cell .check { opacity: .85; }
 
 /* ---------- 登录 ---------- */
 #login { max-width: 360px; margin: 120px auto; padding: 40px 32px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; text-align: center; }
@@ -131,14 +138,17 @@ table.admin th { color: var(--muted); font-weight: 500; }
     <div class="topbar">
       <input type="search" id="search" placeholder="搜索照片 / 相册…">
       <span style="flex:1"></span>
-      <button id="select-btn" style="display:none">☑ 选择</button>
       <button class="primary" id="upload-btn" style="display:none">上传</button>
       <div style="position:relative">
         <div class="avatar" id="avatar">我</div>
-        <div id="avatar-menu" style="display:none;position:absolute;right:0;top:44px;min-width:180px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.35);padding:6px;z-index:150">
-          <button id="menu-password" style="display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px">🔒 修改密码</button>
-          <button id="menu-theme" style="display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px">🌓 切换深浅色</button>
-          <button id="menu-logout" style="display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px;color:var(--danger)">↩ 退出登录</button>
+        <div id="avatar-menu" style="display:none;position:absolute;right:0;top:44px;width:230px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 34px rgba(0,0,0,.4);padding:10px;z-index:150;text-align:center">
+          <div style="position:relative;display:inline-block;margin-top:6px">
+            <div class="avatar" id="menu-avatar" style="width:72px;height:72px;font-size:28px;cursor:default">我</div>
+          </div>
+          <div style="font-weight:600;font-size:17px;margin:8px 0 12px" id="menu-name">我</div>
+          <button id="menu-password" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px">🔒 修改密码</button>
+          <button id="menu-theme" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px">🌓 深色模式</button>
+          <button id="menu-logout" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;color:var(--danger)">↩ 退出登录</button>
         </div>
       </div>
     </div>
@@ -147,7 +157,28 @@ table.admin th { color: var(--muted); font-weight: 500; }
   </div>
 </div>
 
-<div id="viewer"><button class="close" onclick="document.getElementById('viewer').style.display='none'">✕ 关闭</button><img id="full-img" alt=""></div>
+<div id="viewer" style="display:none">
+  <div id="lb-bar">
+    <span id="lb-title" style="font-weight:600"></span>
+    <span style="flex:1"></span>
+    <button id="lb-fav">♡ 收藏</button>
+    <button id="lb-share">🔗 分享</button>
+    <button id="lb-detail">ℹ 详情</button>
+    <button id="lb-trash" style="color:var(--danger)">🗑 回收站</button>
+    <button id="lb-close">✕</button>
+  </div>
+  <div id="lb-stage">
+    <img id="full-img" alt="" draggable="false">
+  </div>
+  <div id="lb-tools">
+    <button id="lb-zoom-in">＋</button>
+    <button id="lb-zoom-out">－</button>
+    <button id="lb-rotate">⟳</button>
+    <button id="lb-flip-h">⇋</button>
+    <button id="lb-flip-v">⇵</button>
+    <button id="lb-reset">1:1</button>
+  </div>
+</div>
 <div id="modal-root"></div>
 <div id="toast"></div>
 <input type="file" id="file-input" multiple accept="image/*,video/*" style="display:none">
