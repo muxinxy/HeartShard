@@ -35,6 +35,8 @@ pub fn auth(state: &AppState, headers: &HeaderMap) -> Result<User, Response> {
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "缺少会话令牌"))?;
     state
         .users
+        .lock()
+        .unwrap()
         .verify(token)
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "会话无效或已过期"))
 }
@@ -75,7 +77,7 @@ pub async fn token_query_bridge(
 }
 
 fn effective(state: &AppState, user: &User, album_id: &str, parents: &HashMap<String, Option<String>>) -> Perm {
-    let groups = state.users.groups_of(&user.uid);
+    let groups = state.users.lock().unwrap().groups_of(&user.uid);
     state.acl.lock().unwrap().effective(user, &groups, album_id, parents)
 }
 
@@ -87,11 +89,12 @@ fn visible_albums(
     parents: &HashMap<String, Option<String>>,
 ) -> Result<Vec<(AlbumInfo, Perm)>, Response> {
     let albums = core.list_albums().map_err(|e| s_err(e.to_string()))?;
+    let groups = state.users.lock().unwrap().groups_of(&user.uid);
     let acl = state.acl.lock().unwrap();
     Ok(albums
         .into_iter()
         .filter_map(|a| {
-            let p = acl.effective(user, &state.users.groups_of(&user.uid), &a.id, parents);
+            let p = acl.effective(user, &groups, &a.id, parents);
             (p >= Perm::View).then_some((a, p))
         })
         .collect())
@@ -106,8 +109,7 @@ pub struct LoginReq {
 }
 
 pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
-    let users = &state.users;
-    match users.login(&req.name, &req.password) {
+    match state.users.lock().unwrap().login(&req.name, &req.password) {
         Ok((token, user)) => Json(serde_json::json!({
             "token": token,
             "uid": user.uid,
@@ -445,6 +447,71 @@ pub async fn raw(State(state): S, headers: HeaderMap, AxumPath(hash): AxumPath<S
     }
 }
 
+// ---------------------------------------------------------------- 收藏 / 删除（照片级）
+
+/// 校验调用者对 blob 所在任一相册有 manage（admin 直通）。
+fn require_manage_on_blob(state: &AppState, user: &User, hash: &str) -> Result<(), Response> {
+    if user.is_admin {
+        return Ok(());
+    }
+    let core = state.core.lock().unwrap();
+    let parents = parent_map(&core)?;
+    let groups = state.users.lock().unwrap().groups_of(&user.uid);
+    let acl = state.acl.lock().unwrap();
+    for album_id in core.list_albums().unwrap_or_default().iter().map(|a| a.id.clone()) {
+        if let Ok(blobs) = core.list_album_blobs(&album_id) {
+            if blobs.iter().any(|b| b.blob_hash == hash)
+                && acl.effective(user, &groups, &album_id, &parents) >= Perm::Manage
+            {
+                return Ok(());
+            }
+        }
+    }
+    Err(err(StatusCode::FORBIDDEN, "无权操作该照片"))
+}
+
+#[derive(Deserialize)]
+pub struct FavoriteReq {
+    pub favorite: bool,
+}
+
+/// POST /api/blobs/{hash}/favorite
+pub async fn set_favorite(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(hash): AxumPath<String>,
+    Json(req): Json<FavoriteReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    if let Err(e) = require_manage_on_blob(&state, &user, &hash) {
+        return e;
+    }
+    let core = state.core.lock().unwrap();
+    match core.set_blob_favorite(&hash, req.favorite) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
+/// POST /api/blobs/{hash}/delete（移入回收站）
+pub async fn delete_blob(State(state): S, headers: HeaderMap, AxumPath(hash): AxumPath<String>) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    if let Err(e) = require_manage_on_blob(&state, &user, &hash) {
+        return e;
+    }
+    let core = state.core.lock().unwrap();
+    match core.delete_blob(&hash) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
 // ---------------------------------------------------------------- 管理（v1 仅 admin）
 
 pub async fn trash_list(State(state): S, headers: HeaderMap) -> Response {
@@ -500,7 +567,7 @@ pub async fn run_sync(State(state): S, headers: HeaderMap) -> Response {
     if !user.is_admin {
         return err(StatusCode::FORBIDDEN, "仅管理员");
     }
-    let sources = state.cfg.sources.clone();
+    let sources = state.sources.lock().unwrap().clone();
     let state2 = state.clone();
     let result = tokio::task::spawn_blocking(move || {
         let mut out = Vec::new();
@@ -603,17 +670,24 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/albums", get(list_albums).post(create_album))
         .route("/api/albums/{id}/blobs", get(album_blobs))
         .route("/api/albums/{id}/upload", post(upload))
-        .route("/api/albums/{id}/share", post(crate::share::create_share))
-        .route("/api/shares", get(crate::share::list_shares))
+        .route("/api/albums/{id}/share", post(crate::share::create_album_share))
+        .route("/api/shares", get(crate::share::list_shares).post(crate::share::create_blobs_share))
         .route("/api/shares/{id}", axum::routing::delete(crate::share::delete_share))
         .route("/api/blobs", get(list_blobs))
         .route("/api/blobs/{hash}/thumbnail", get(thumbnail))
         .route("/api/blobs/{hash}/raw", get(raw))
+        .route("/api/blobs/{hash}/favorite", post(set_favorite))
+        .route("/api/blobs/{hash}/delete", post(delete_blob))
         .route("/api/trash", get(trash_list))
         .route("/api/blobs/{hash}/restore", post(restore_blob))
         .route("/api/blobs/{hash}/purge", post(purge_blob))
         .route("/api/sync/run", post(run_sync))
         .route("/api/albums/{id}/acl", get(get_acl).post(set_acl))
+        .route("/api/admin/users", get(crate::admin::list_users).post(crate::admin::create_user))
+        .route("/api/admin/users/{uid}", axum::routing::put(crate::admin::update_user).delete(crate::admin::delete_user))
+        .route("/api/admin/groups", get(crate::admin::list_groups).post(crate::admin::set_groups))
+        .route("/api/admin/sources", get(crate::admin::list_sources).post(crate::admin::set_sources))
+        .route("/api/admin/status", get(crate::admin::status))
         .route("/s/{id}", get(crate::share::share_page))
         .route("/s/{id}/meta", get(crate::share::share_meta))
         .route("/s/{id}/keys", get(crate::share::share_keys))

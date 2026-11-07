@@ -27,6 +27,8 @@ pub struct Group {
 pub struct UserStore {
     pub users: Vec<User>,
     pub groups: Vec<Group>,
+    users_path: std::path::PathBuf,
+    groups_path: std::path::PathBuf,
     sessions: Mutex<HashMap<String, String>>, // token → uid
 }
 
@@ -56,12 +58,109 @@ fn verify_password(pw: &str, hash: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn uid_for(name: &str) -> String {
+pub fn uid_for(name: &str) -> String {
     // 用户名即 uid（家庭规模，无需 uuid；只做小写去空白）
     name.trim().to_lowercase()
 }
 
 impl UserStore {
+    /// 新增用户（管理界面；口令在管理页输入，argon2 落盘）。
+    pub fn add_user(&mut self, name: &str, password: &str, is_admin: bool) -> Result<User, String> {
+        let uid = uid_for(name);
+        if uid.is_empty() {
+            return Err("用户名不能为空".into());
+        }
+        if self.users.iter().any(|u| u.uid == uid) {
+            return Err(format!("用户「{name}」已存在"));
+        }
+        if password.is_empty() {
+            return Err("口令不能为空".into());
+        }
+        let user = User {
+            uid: uid.clone(),
+            name: name.trim().to_string(),
+            password_hash: hash_password(password)?,
+            is_admin,
+        };
+        self.users.push(user.clone());
+        self.save_users()?;
+        Ok(user)
+    }
+
+    /// 修改用户：口令（重哈希）/ 显示名 / admin 标记；None 表示不改。
+    pub fn update_user(
+        &mut self,
+        uid: &str,
+        password: Option<&str>,
+        name: Option<&str>,
+        is_admin: Option<bool>,
+    ) -> Result<(), String> {
+        let user_idx = self
+            .users
+            .iter()
+            .position(|u| u.uid == uid)
+            .ok_or_else(|| format!("用户 {uid} 不存在"))?;
+        if let Some(p) = password {
+            if p.is_empty() {
+                return Err("口令不能为空".into());
+            }
+            self.users[user_idx].password_hash = hash_password(p)?;
+        }
+        if let Some(n) = name {
+            if !n.trim().is_empty() {
+                self.users[user_idx].name = n.trim().to_string();
+            }
+        }
+        if let Some(a) = is_admin {
+            // 至少保留一个管理员
+            let admins_after = self
+                .users
+                .iter()
+                .filter(|u| if u.uid == uid { a } else { u.is_admin })
+                .count();
+            if admins_after == 0 {
+                return Err("至少保留一个管理员".into());
+            }
+            self.users[user_idx].is_admin = a;
+        }
+        self.save_users()
+    }
+
+    /// 删除用户（同时移出所有组、吊销会话）。
+    pub fn remove_user(&mut self, uid: &str) -> Result<(), String> {
+        if self.users.iter().filter(|u| u.is_admin).count() <= 1
+            && self.users.iter().any(|u| u.uid == uid && u.is_admin)
+        {
+            return Err("至少保留一个管理员".into());
+        }
+        self.users.retain(|u| u.uid != uid);
+        for g in &mut self.groups {
+            g.members.retain(|m| m != uid);
+        }
+        self.sessions
+            .lock()
+            .unwrap()
+            .retain(|_, v| v != uid);
+        self.save_users()?;
+        self.save_groups()
+    }
+
+    pub fn save_users(&self) -> Result<(), String> {
+        let path = self.users_path.clone();
+        write_json(&path, &self.users)
+    }
+
+    pub fn save_groups(&self) -> Result<(), String> {
+        let path = self.groups_path.clone();
+        write_json(&path, &self.groups)
+    }
+
+    /// 整体替换组列表（管理界面）。
+    pub fn set_groups(&mut self, groups: Vec<Group>) -> Result<(), String> {
+        self.groups = groups;
+        self.save_groups()
+    }
+
     /// 从 server.toml 的 users/groups 初始化（upsert 到 users.json / groups.json）。
     /// 口令以 server.toml/环境变量为准，每次启动同步 hash（便于改密）。
     pub fn init(root: &Path, cfg: &crate::config::ServerConfig) -> Result<Self, String> {
@@ -120,6 +219,8 @@ impl UserStore {
         Ok(Self {
             users,
             groups,
+            users_path,
+            groups_path,
             sessions: Mutex::new(HashMap::new()),
         })
     }

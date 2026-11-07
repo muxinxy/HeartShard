@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 heart-core = { path = "../core-rs/crates/heart-core" }
+crypto = { path = "../core-rs/crates/crypto" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 syncer = { package = "heartshard-syncer", path = "../tools/syncer" }
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

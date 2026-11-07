@@ -264,31 +264,51 @@ API（Bearer token，登录获得）：
 | `POST /api/albums/{id}/acl`（用户/组 × 权限，null=回退继承） | manage |
 | `POST /api/sync/run` | admin |
 
-已知限制：`/raw` 视频整段载入内存（Range 流式属后续优化）；回收站操作 v1 仅 admin。
+已知限制：`/raw` 视频整段载入内存（Range 流式属后续优化）。
 
 ### 7.6.1 分享网关与 PWA（M4）
 
-**分享链接**（E2E 保持——服务器只见密文）：
+- 相册分享：`POST /api/albums/{id}/share`（manage）→ `{share_id, url}`；创建时
+  `HeartCore::assemble_encrypted` 把图片 blob RS 重组为**密文包**（不解密）缓存，
+  meta.json 无密钥、keys.json 存每 blob 的 blob_key。
+- 观看端 `/s/{share_id}`：内嵌查看器，浏览器 WebCrypto AES-256-GCM 解密
+  （AAD=`blob_hash‖chunk_index‖total_chunks`、tagLength 96，与生产一致）。
+- PWA：manifest + sw（仅缓存静态壳）；iOS 需 HTTPS/localhost 才能添加到主屏幕。
 
-- `POST /api/albums/{id}/share`（manage）→ `{share_id, url}`；`DELETE /api/shares/{id}`；
-  `GET /api/shares`。`expires_days` 可选过期。
-- 创建时后台用 `HeartCore::assemble_encrypted` 把相册内每个图片 blob **RS 重组为
-  密文包**（各 chunk 的 `iv‖ct‖tag` 顺序拼接，不解密）缓存到
-  `share_cache/<album>/{hash}.enc`，同时生成 `meta.json`（文件清单+chunk 切分，
-  **无密钥**）与 `keys.json`（每 blob 的 blob_key）。
-- 观看端 `/s/{share_id}`：内嵌查看器页，浏览器取 meta → 取 keys → 逐 blob 取密文包
-  → **WebCrypto AES-256-GCM 解密**（每 chunk `iv‖ct‖tag`，AAD=
-  `blob_hash‖chunk_index‖total_chunks`，**tagLength: 96**——与生产 encrypt_chunk
-  完全一致）。服务器全程不产生明文。
-- 密钥静置于服务器 keys.json（服务器派生密钥是分享的必然）；链接本身不含密钥。
+### 7.6.2 v2.0 M5a：管理界面网页化 + 分享增强 + MT Photos 风格 UI（2026-11-07）
 
-**内置 PWA**（同一进程静态托管）：
+**中文提示收尾**：commands/storage_video/lib.rs 残留英文提示全部中文化。
 
-- `/` 即网页客户端：登录 → 相册下拉 → 照片网格（懒加载缩略图）→ 灯箱（原图）→
-  多选上传（走加密管线）→ 一键生成分享链接。
-- `manifest.webmanifest` + `sw.js`（仅缓存静态壳；API/数据一律直连）。
-- iOS：HTTPS（或 localhost）打开 → 添加到主屏幕（数据驱逐豁免）。局域网 IP 明文
-  HTTP 下浏览器不允许装 PWA——部署时用 Caddy/mkcert 提供内网 HTTPS。
+**配置网页端化**（server.toml 降级为引导文件）：
+
+- `GET/POST/PUT/DELETE /api/admin/users`——用户增删改（argon2 重哈希、至少保留一个
+  管理员、删除即吊销会话）；`GET/POST /api/admin/groups`（整体保存组列表）；
+  `GET/POST /api/admin/sources`——同步源运行时化（sources.json，热加载，server.toml
+  的 sources 首启迁移）；`GET /api/admin/status`（库/用户/分享统计）。
+- AppState.users 改 `Mutex<UserStore>`（管理写并发安全）。
+
+**分享增强**：
+
+- `POST /api/shares {blob_hashes, expires_days, name}`——**单张/多选分享**（逐 blob
+  校验 manage 权限）；`Share` 结构泛化 `{kind: album|blobs, blob_hashes}`。
+- **链接分享默认去元数据**：图片 `decrypt_blob_bytes` → image 重编码（JPEG q85/PNG，
+  剥离全部 EXIF/GPS）→ 新随机密钥按生产 chunk 格式重加密（AAD 与 chunk 序号对应）
+  → 缓存「干净密文」；不可解码图（HEIC 等）与视频回退原密文（meta 标
+  `sanitized:false`）。测试：解密后字节≠原图、像素近似一致（平均差 <8）。
+
+**内置 PWA 重构（MT Photos 风格）**：
+
+- 侧边栏（照片/相册/分享/回收站 + 管理区：用户/组/同步源/状态）+ hash 路由 +
+  顶栏搜索（前端过滤）+ 时间线按日分组 + 右侧年份锚点导航 + 照片右键菜单 +
+  多选模式（☑选择 → 底部操作条 → 多选分享）+ 相册封面墙 + 相册内 ACL 权限编辑 +
+  浅/深色切换。
+
+新增照片级端点：`POST /api/blobs/{hash}/favorite`、`POST /api/blobs/{hash}/delete`
+（blob 所在任一相册 manage 权限）。
+
+**v2.0 后续**（见计划）：M5b 桌面客户端双模式（连后台）+ 双端 UI 统一；M5c 探索页
+（地点相册/类型分类）+ 全平台动态照片（Android motion photo / Apple Live Photo，
+HEIC 解码为最大风险项）。
 
 ## 8. 构建/发布（产物）
 

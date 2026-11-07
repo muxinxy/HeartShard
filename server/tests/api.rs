@@ -47,7 +47,7 @@ fn build_app(
             },
         ],
         groups: vec![],
-        sources,
+        sources: sources.clone(),
         sync_interval_secs: 0,
     };
     let users = UserStore::init(root, &cfg).unwrap();
@@ -55,11 +55,12 @@ fn build_app(
     let shares = heartshard_server::share::ShareStore::load(root);
     let state = Arc::new(AppState {
         core: Mutex::new(core),
-        users,
+        users: Mutex::new(users),
         acl: Mutex::new(acl),
         cfg,
         server_root: root.to_path_buf(),
         shares: Mutex::new(shares),
+        sources: Mutex::new(sources),
     });
     api::router().with_state(state)
 }
@@ -463,4 +464,216 @@ async fn share_e2e_ciphertext_roundtrip() {
         plain.extend_from_slice(&pt);
     }
     assert_eq!(plain, png, "解密明文与上传内容一致");
+}
+
+/// 管理界面后端：admin 经 API 建用户 → 新用户登录 → 建管理员改口令 → 删除用户。
+#[tokio::test]
+async fn admin_user_crud() {
+    let lib = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let app = build_app(lib.path(), root.path(), vec![]);
+    let alice = login(&app, "alice", "alicepw").await;
+
+    // bob（普通成员）无权管理
+    let bob = login(&app, "bob", "bobpw").await;
+    let res = get(&app, "/api/admin/users", &bob).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 建用户 carol
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/users")
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "name": "carol", "password": "carolpw", "admin": false }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // carol 能登录
+    let carol = login(&app, "carol", "carolpw").await;
+    let res = get(&app, "/api/me", &carol).await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 改口令 → 新口令可登录、旧口令拒绝
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/admin/users/carol")
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "password": "newpw" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    login(&app, "carol", "newpw").await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "name": "carol", "password": "carolpw" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 删除 carol → 会话失效
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/admin/users/carol")
+                .header("authorization", format!("Bearer {alice}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = get(&app, "/api/me", &carol).await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// 多选分享（去元数据）：pkg 解密后的图片与原图**字节不同**（EXIF 剥离）但**像素一致**。
+#[tokio::test]
+async fn blobs_share_metadata_stripped() {
+    let lib = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let app = build_app(lib.path(), root.path(), vec![]);
+    let alice = login(&app, "alice", "alicepw").await;
+
+    let album_id = json_body(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/albums")
+                    .header("authorization", format!("Bearer {alice}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::json!({ "name": "去元数据" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 上传一张带元数据的 JPEG（手工构造带 EXIF 的最小 JPEG：直接用 image 生成再无 EXIF——
+    // 为验证"字节不同、像素相同"，用非平凡像素 PNG 上传）
+    let mut png = Vec::new();
+    let mut img = image::DynamicImage::new_rgb8(64, 48);
+    // 填充渐变像素保证重编码非平凡；JPEG q75 写出 → 重编码 q85 字节必不同
+    for (x, y, p) in img.as_mut_rgb8().unwrap().enumerate_pixels_mut() {
+        *p = image::Rgb([(x * 4 % 256) as u8, (y * 5 % 256) as u8, ((x + y) * 3 % 256) as u8]);
+    }
+    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut png, 75);
+    img.write_with_encoder(enc).unwrap();
+    let boundary = "XBOUND";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"meta.jpg\"\r\n\r\n").as_bytes());
+    body.extend_from_slice(&png);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/api/albums/{album_id}/upload"))
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let up = json_body(res).await;
+    assert_eq!(up["status"], "imported", "{up}");
+    let hash = up["blob_hash"].as_str().unwrap().to_string();
+
+    // 多选分享
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/shares")
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "blob_hashes": [hash], "name": "精选" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let share_id = json_body(res).await["share_id"].as_str().unwrap().to_string();
+
+    // pkg 密文 → keys → 生产解密 → 与原图**字节不同**（无 EXIF 段差异）但**像素一致**
+    let res = get(&app, &format!("/s/{share_id}/meta"), "").await;
+    let meta = json_body(res).await;
+    assert_eq!(meta["files"][0]["sanitized"], true, "图片应标记为已去元数据");
+    let res = get(&app, &format!("/s/{share_id}/pkg/{hash}"), "").await;
+    let pkg = axum::body::to_bytes(res.into_body(), 64 * 1024 * 1024).await.unwrap();
+    let res = get(&app, &format!("/s/{share_id}/keys"), "").await;
+    let keys = json_body(res).await;
+    let key_hex = keys["keys"][&hash].as_str().unwrap().to_string();
+    let key_bytes: [u8; 32] = (0..32)
+        .map(|i| u8::from_str_radix(&key_hex[i * 2..i * 2 + 2], 16).unwrap())
+        .collect::<Vec<u8>>()
+        .try_into()
+        .unwrap();
+    let hash_bytes: [u8; 32] = hex::decode(&hash).unwrap().try_into().unwrap();
+    let chunk_lens: Vec<usize> = meta["files"][0]["chunk_lens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as usize)
+        .collect();
+    let mut plain = Vec::new();
+    let mut off = 0usize;
+    for (idx, len) in chunk_lens.iter().enumerate() {
+        let chunk = &pkg[off..off + *len];
+        off += *len;
+        let pt = crypto::decrypt_chunk(&key_bytes, chunk, &hash_bytes, idx as u32, chunk_lens.len() as u32)
+            .expect("解密应成功");
+        plain.extend_from_slice(&pt);
+    }
+    assert_ne!(plain, png, "重编码后字节应与原图不同（元数据剥离）");
+    use image::GenericImageView;
+    let decoded = image::load_from_memory(&plain).unwrap();
+    let orig = image::load_from_memory(&png).unwrap();
+    assert_eq!(decoded.dimensions(), orig.dimensions(), "尺寸应一致");
+    // JPEG 有损重编码：像素近似一致（平均绝对差 < 8/255）
+    let a = decoded.into_rgb8();
+    let b = orig.into_rgb8();
+    let diff: u64 = a
+        .as_raw()
+        .iter()
+        .zip(b.as_raw())
+        .map(|(x, y)| (*x as i32 - *y as i32).unsigned_abs() as u64)
+        .sum();
+    let mean = diff as f64 / a.as_raw().len() as f64;
+    assert!(mean < 8.0, "像素应近似一致（平均差 {mean}）");
 }

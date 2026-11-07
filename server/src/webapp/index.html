@@ -8,56 +8,137 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <title>牧心相册</title>
 <style>
-:root { color-scheme: dark; --bg:#14161a; --card:#1b1e24; --border:#23262d; --fg:#e8e6e3; --muted:#8a8f98; --primary:#5b8def; --input:#12141a; }
-body { margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 16px; }
+:root {
+  color-scheme: dark;
+  --bg: #14161a; --fg: #e8e6e3; --card: #1b1e24; --border: #23262d;
+  --primary: #5b8def; --input: #12141a; --muted: #8a8f98;
+  --success: #7ed6a0; --danger: #ef6a6a; --warn: #f0b45c;
+  --sidebar-bg: #191c22; --row: #191c22;
+}
+body.theme-light {
+  color-scheme: light;
+  --bg: #f5f6f8; --fg: #1a1d21; --card: #ffffff; --border: #d8dce2;
+  --primary: #3d6fe0; --input: #eef0f3; --muted: #6a7078;
+  --success: #2e9e5c; --danger: #d44; --warn: #c8860d;
+  --sidebar-bg: #eceef1; --row: #ffffff;
+}
 * { box-sizing: border-box; }
-header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(20,22,26,.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
-.brand { font-weight: 700; font-size: 17px; }
-button { font-size: 15px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: #1e2129; color: var(--fg); cursor: pointer; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 15px; }
+button { font-size: 14px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--primary); color: #fff; border: none; font-weight: 600; }
-select, input { font-size: 15px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--input); color: var(--fg); }
+button.danger { color: var(--danger); }
+button:disabled { opacity: .5; cursor: default; }
+input, select, textarea { font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--input); color: var(--fg); }
+
+/* ---------- 布局 ---------- */
+#app { display: none; }
+#app.layout { display: flex; min-height: 100vh; }
+.sidebar { width: 200px; flex-shrink: 0; background: var(--sidebar-bg); padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; }
+.sidebar .logo { font-weight: 700; font-size: 17px; padding: 6px 12px 18px; }
+.sidebar a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: var(--fg); text-decoration: none; cursor: pointer; }
+.sidebar a.active { background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); font-weight: 600; }
+.sidebar a:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.sidebar .sec { margin: 14px 12px 4px; font-size: 12px; color: var(--muted); }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 10; }
+.topbar input[type=search] { flex: 1; max-width: 480px; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--primary); color: #fff; display: grid; place-items: center; font-weight: 700; cursor: pointer; }
+.content { flex: 1; padding: 16px 20px 60px; position: relative; }
+
+/* ---------- 时间线网格 ---------- */
+.day-header { font-size: 14px; font-weight: 600; color: var(--muted); margin: 18px 0 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.cell { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--input); cursor: pointer; }
+.cell img { width: 100%; height: 100%; object-fit: cover; }
+.cell .name { position: absolute; bottom: 0; left: 0; right: 0; padding: 16px 8px 5px; font-size: 12px; background: linear-gradient(transparent, rgba(0,0,0,.65)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell .check { position: absolute; top: 8px; left: 8px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.35); display: grid; place-items: center; color: transparent; font-size: 13px; }
+.cell.sel .check { background: var(--primary); border-color: var(--primary); color: #fff; }
+.cell.sel { outline: 3px solid var(--primary); outline-offset: -3px; }
+.years { position: fixed; right: 10px; top: 110px; text-align: right; font-size: 12px; color: var(--muted); user-select: none; }
+.years div { padding: 3px 6px; cursor: pointer; border-radius: 6px; }
+.years div:hover { color: var(--primary); }
+
+/* ---------- 相册墙 ---------- */
+.album-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-top: 8px; }
+.album-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; cursor: pointer; background: var(--card); }
+.album-card .cov { aspect-ratio: 1; background: var(--input); position: relative; }
+.album-card .cov img { width: 100%; height: 100%; object-fit: cover; }
+.album-card .nm { padding: 10px 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+.album-card .cnt { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+/* ---------- 选择操作条 ---------- */
+.selbar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 90; display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 10px 32px rgba(0,0,0,.35); flex-wrap: wrap; }
+
+/* ---------- 表格（管理） ---------- */
+table.admin { width: 100%; border-collapse: collapse; margin-top: 10px; }
+table.admin td, table.admin th { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: 14px; }
+table.admin th { color: var(--muted); font-weight: 500; }
+.form-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 10px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.form-card label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+
+/* ---------- 模态 ---------- */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 100; }
+.modal { width: 460px; max-width: 94vw; max-height: 84vh; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; }
+.modal h3 { margin: 0 0 12px; }
+.modal .close { float: right; background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+
+/* ---------- 灯箱 ---------- */
+#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; z-index: 120; }
+#viewer img { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%; }
+#viewer .close { position: absolute; top: 14px; right: 16px; z-index: 2; }
+
+/* ---------- 登录 ---------- */
 #login { max-width: 360px; margin: 120px auto; padding: 40px 32px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; text-align: center; }
 #login input { width: 100%; margin: 8px 0; }
 #login button { width: 100%; margin-top: 12px; }
-#main { max-width: 1000px; margin: 0 auto; padding: 0 16px 60px; }
-.bar { display: flex; gap: 8px; align-items: center; padding: 12px 0; flex-wrap: wrap; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; padding-top: 8px; }
-.cell { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--input); cursor: pointer; }
-.cell img { width: 100%; height: 100%; object-fit: cover; }
-.cell .name { position: absolute; bottom: 0; left: 0; right: 0; padding: 14px 8px 5px; font-size: 12px; background: linear-gradient(transparent, rgba(0,0,0,.65)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.album-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; cursor: pointer; background: var(--card); }
-.album-card .cov { aspect-ratio: 1; background: var(--input); }
-.album-card .nm { padding: 10px 12px; font-weight: 600; display: flex; justify-content: space-between; }
-.album-card .cnt { color: var(--muted); font-weight: 400; font-size: 13px; }
-#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; z-index: 100; }
-#viewer img { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%; }
-#viewer .close { position: absolute; top: 14px; right: 16px; z-index: 2; }
-#toast { position: fixed; top: 16px; right: 16px; z-index: 200; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--primary); padding: 12px 16px; border-radius: 10px; display: none; max-width: 360px; font-size: 14px; }
+
+/* ---------- 其他 ---------- */
+#toast { position: fixed; top: 16px; right: 16px; z-index: 300; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--primary); padding: 12px 16px; border-radius: 10px; display: none; max-width: 380px; font-size: 14px; white-space: pre-wrap; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hint { color: var(--muted); font-size: 13px; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--input); color: var(--muted); }
 </style>
 </head>
 <body>
+
 <div id="login">
   <h1 style="font-size:24px;margin:0 0 4px">牧心相册</h1>
-  <p style="color:var(--muted);font-size:13px;margin:0 0 16px">家庭加密相册</p>
+  <p class="hint" style="margin:0 0 16px">家庭加密相册</p>
   <input id="user" placeholder="用户名" autocomplete="username">
   <input id="pass" type="password" placeholder="口令" autocomplete="current-password">
   <button class="primary" id="login-btn">登录</button>
 </div>
 
-<div id="main" style="display:none">
-  <header>
-    <span class="brand">牧心相册</span>
-    <span style="flex:1"></span>
-    <select id="album-sel"><option value="">全部照片</option></select>
-    <button class="primary" id="upload-btn">上传</button>
-    <button id="share-btn">分享</button>
-    <button id="logout-btn">退出</button>
-  </header>
-  <div class="bar"><span id="count" style="color:var(--muted);font-size:14px"></span></div>
-  <div id="content" class="grid"></div>
+<div id="app" class="layout">
+  <nav class="sidebar">
+    <div class="logo">牧心相册</div>
+    <a data-view="photos" class="active">🖼 照片</a>
+    <a data-view="albums">📁 相册</a>
+    <a data-view="shares">🔗 分享</a>
+    <a data-view="trash">🗑 回收站</a>
+    <div class="sec" id="admin-sec" style="display:none">管理</div>
+    <a data-view="admin-users" id="nav-admin-users" style="display:none">👥 用户管理</a>
+    <a data-view="admin-groups" id="nav-admin-groups" style="display:none">🏷 用户组</a>
+    <a data-view="admin-sources" id="nav-admin-sources" style="display:none">🔄 同步源</a>
+    <a data-view="admin-status" id="nav-admin-status" style="display:none">📊 系统状态</a>
+    <div style="flex:1"></div>
+    <a id="theme-toggle">🌓 浅色 / 深色</a>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <input type="search" id="search" placeholder="搜索照片 / 相册…">
+      <span style="flex:1"></span>
+      <button id="select-btn" style="display:none">☑ 选择</button>
+      <button class="primary" id="upload-btn" style="display:none">上传</button>
+      <div class="avatar" id="avatar">我</div>
+    </div>
+    <div class="content" id="view"></div>
+    <div class="years" id="years"></div>
+  </div>
 </div>
 
-<div id="viewer"><button class="close" onclick="viewer.style.display='none'">✕</button><img id="full-img" alt=""></div>
+<div id="viewer"><button class="close" onclick="document.getElementById('viewer').style.display='none'">✕ 关闭</button><img id="full-img" alt=""></div>
+<div id="modal-root"></div>
 <div id="toast"></div>
 <input type="file" id="file-input" multiple accept="image/*,video/*" style="display:none">
 

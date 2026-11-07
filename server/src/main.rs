@@ -5,7 +5,7 @@
 //! ```
 
 use heart_core::library::HeartCore;
-use heartshard_server::{acl, api, auth::UserStore, config::ServerConfig, share, AppState};
+use heartshard_server::{acl, admin, api, auth::UserStore, config::ServerConfig, share, AppState};
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -54,13 +54,25 @@ fn main() {
     };
     let acl_store = acl::AclStore::load(&server_root);
     let shares = share::ShareStore::load(&server_root);
+    // 同步源运行时化：sources.json 优先；无文件时从 server.toml 迁移（写回文件）
+    let sources = if server_root.join("sources.json").exists() {
+        admin::load_sources(&server_root)
+    } else {
+        let s = cfg.sources.clone();
+        let _ = std::fs::write(
+            server_root.join("sources.json"),
+            serde_json::to_vec_pretty(&s).unwrap_or_default(),
+        );
+        s
+    };
     let state = Arc::new(AppState {
         core: Mutex::new(core),
-        users,
+        users: Mutex::new(users),
         acl: Mutex::new(acl_store),
         cfg: cfg.clone(),
         server_root,
         shares: Mutex::new(shares),
+        sources: Mutex::new(sources),
     });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -68,8 +80,8 @@ fn main() {
         .build()
         .expect("tokio runtime");
     rt.block_on(async move {
-        // 常驻同步引擎（复用 syncer 策略矩阵/清单 diff）
-        if cfg.sync_interval_secs > 0 && !cfg.sources.is_empty() {
+        // 常驻同步引擎（复用 syncer 策略矩阵/清单 diff；源列表每轮从运行时配置读取）
+        if cfg.sync_interval_secs > 0 {
             let sync_state = state.clone();
             tokio::spawn(async move {
                 loop {
@@ -77,7 +89,10 @@ fn main() {
                         sync_state.cfg.sync_interval_secs,
                     ))
                     .await;
-                    let sources = sync_state.cfg.sources.clone();
+                    let sources = sync_state.sources.lock().unwrap().clone();
+                    if sources.is_empty() {
+                        continue;
+                    }
                     let st = sync_state.clone();
                     let _ = tokio::task::spawn_blocking(move || {
                         for src in &sources {

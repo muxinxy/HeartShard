@@ -4,7 +4,7 @@
 pub mod engine;
 pub mod export;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub type Res<T> = Result<T, String>;
 
@@ -24,7 +24,7 @@ pub struct DataConfig {
     pub password: Option<String>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Serialize)]
 pub struct SourceConfig {
     pub id: String,
     /// local | s3 | webdav | openlist

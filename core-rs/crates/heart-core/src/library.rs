@@ -1267,7 +1267,7 @@ impl HeartCore {
         )?;
 
         if crypto::sha256(&decoded) != blob_hash_bytes {
-            return Err(LibError::Data("SHA-256 mismatch".into()));
+            return Err(LibError::Data("SHA-256 校验失败（还原内容与记录不一致）".into()));
         }
         Ok((decoded, manifest))
     }

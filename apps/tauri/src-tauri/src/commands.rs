@@ -180,7 +180,7 @@ pub fn thumbnail(blob_hash: String, state: State<'_, SessionState>) -> Result<St
         .unwrap()
         .thumbnail_cached(&blob_hash)
         .map_err(err_str)?
-        .ok_or_else(|| "thumbnail not available".to_string())
+        .ok_or_else(|| "缩略图不可用（视频或非图片）".to_string())
 }
 
 #[tauri::command]
@@ -428,7 +428,7 @@ pub fn open_path_system(path: String, app: tauri::AppHandle) -> Result<(), Strin
     use tauri_plugin_opener::OpenerExt;
     app.opener()
         .open_path(path, None::<&str>)
-        .map_err(|e| format!("open path failed: {e}"))
+        .map_err(|e| format!("打开文件失败: {e}"))
 }
 
 /// §10 点击预览：解密 blob → 临时文件 → 返回 (路径, MIME)。
@@ -450,11 +450,11 @@ pub struct PreviewResult {
 
 /// 构造数据目录：便携模式 → exe 同目录 data/（无 app_data_dir 依赖）。
 pub fn resolve_data_dir(_app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("cannot resolve exe path: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| format!("无法定位程序路径: {e}"))?;
     let dir = exe
         .parent()
-        .ok_or("exe has no parent")?
+        .ok_or("无法确定程序所在目录")?
         .join("data");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create data dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建数据目录: {e}"))?;
     Ok(dir)
 }

@@ -29,7 +29,7 @@ pub fn handle_video_request(
         .to_string();
 
     if blob_hash.len() != 64 {
-        return response(400, b"bad blob hash".to_vec());
+        return response(400, "blob 哈希非法".as_bytes().to_vec());
     }
 
     let range_header = request
@@ -41,7 +41,7 @@ pub fn handle_video_request(
     let (offset, len) = parse_range(range_header).unwrap_or((0, u64::MAX));
 
     let Ok(detail) = core.blob_detail(&blob_hash) else {
-        return response(404, b"blob not found".to_vec());
+        return response(404, "blob 不存在".as_bytes().to_vec());
     };
     let total_len = detail.total_len as u64;
     let len = std::cmp::min(len, total_len.saturating_sub(offset));
@@ -61,7 +61,7 @@ pub fn handle_video_request(
             }
             resp.body(data).unwrap_or_else(|_| response(500, Vec::new()))
         }
-        Err(_) => response(500, b"decrypt failed".to_vec()),
+        Err(_) => response(500, "解密失败".as_bytes().to_vec()),
     }
 }
 

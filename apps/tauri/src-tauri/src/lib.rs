@@ -41,7 +41,7 @@ pub fn run() {
         .setup(|app| {
             // 数据目录在 setup 中解析；解析失败直接报错退出（无数据目录无法工作）
             let data_dir =
-                commands::resolve_data_dir(app.handle()).expect("cannot resolve app data dir");
+                commands::resolve_data_dir(app.handle()).expect("无法确定数据目录");
             app.manage(commands::SessionState::new(data_dir));
             app.manage(commands::ImportCancel(std::sync::atomic::AtomicBool::new(false)));
             Ok(())
