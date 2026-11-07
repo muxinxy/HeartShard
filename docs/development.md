@@ -150,6 +150,58 @@ Rust 同上断言
 - gzip 字节级跨语言一致不列入契约（以解压内容为准）；实测 flate2 与 Java 17 头字节一致（OS=0xff）。
 - 同步为全量状态发布（幂等），增量 delta 是带宽优化项。
 
+## 7.5 相册同步工具 syncer（M2）
+
+平台无关摄取端：把本地目录或云存储（S3/WebDAV/OpenList）上的照片持续同步进相册库，
+目录结构映射为相册树。定位：无人值守（挂计划任务/cron），与桌面/安卓/PWA 平级，
+共享同一数据平面（同一 mk.wrap + 索引 + delta 同步）。
+
+```powershell
+cd tools\syncer
+cargo run -- run --config syncer.toml          # 一次性同步全部源
+cargo run -- run --source phone --watch        # 常驻轮询（默认 300s）
+cargo run -- export --album "2024旅行" --to D:\backup   # 导出镜像（相册树→目录）
+```
+
+`syncer.toml` 示例：
+
+```toml
+[data]
+dir  = "D:\\HeartShard\\data"        # 与桌面版同一个数据目录
+# password = "..."                   # 缺省读 HEARTSHARD_PASSWORD，再退化终端输入
+
+[[source]]
+id = "phone-backup"                  # 源 id（清单文件名）
+kind = "local"                       # local | s3 | webdav | openlist
+root = "D:\\Photos\\手机"
+strategy = "append"                  # append（默认）| mirror
+# album_root = "手机"                # 相册挂载点；缺省用源内相对目录
+
+[[source]]
+id = "nas-dav"
+kind = "webdav"
+strategy = "mirror"
+delete_mode = "trash"                # mirror 的源删除处理：keep（默认）| trash
+[source.webdav]
+base_url = "https://dav.example.com/photos"
+username = "photos"
+password = "..."
+```
+
+语义速查：
+
+| 事件 | append | mirror |
+|---|---|---|
+| 新文件 | 导入 → 按目录树入相册 | 同左 |
+| 内容修改 | 忽略（永久保留原版） | 新版本入库，旧版本进回收站 |
+| 改名/移动 | 忽略（新路径按新相册处理） | **只改相册关联，blob 不重传** |
+| 源删除 | 忽略（相册保留） | `delete_mode`: keep=相册保留 / trash=进回收站 |
+| 清单外内容 | 首扫自动「收编」按目录树建相册 | 同左 |
+
+实现要点：清单（`<data>/syncer/<id>.manifest.json`，path+size+mtime+sha256+blob_hash）
+三层 diff（path+size+mtime 快筛 → SHA-256 → 相册索引去重）；首跑即完全对账，
+之后增量；`--full` 强制重对账修复清单漂移。远端源 mtime 不可知，diff 以哈希为准。
+
 ## 8. 构建/发布（产物）
 
 ### 8.1 Windows（便携 exe，不构建安装程序）

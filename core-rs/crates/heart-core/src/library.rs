@@ -1312,6 +1312,11 @@ impl HeartCore {
         })
     }
 
+    /// 数据目录（syncer 清单等伴生文件存放用；M2 起供外部工具读取）。
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
     pub fn storage_status(&self) -> Result<Vec<StorageStatus>, LibError> {
         Ok(self
             .storages

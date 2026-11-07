@@ -1,0 +1,32 @@
+[package]
+name = "heartshard-syncer"
+version = "0.1.0"
+description = "HeartShard 相册同步工具：本地/云存储照片源 → 相册库（策略矩阵：append/mirror），目录树映射相册。"
+authors = ["HeartShard contributors"]
+edition = "2024"
+
+[[bin]]
+name = "heartshard-syncer"
+path = "src/main.rs"
+
+[dependencies]
+heart-core = { path = "../../core-rs/crates/heart-core" }
+index = { path = "../../core-rs/crates/index" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+rpassword = "7"
+
+[dev-dependencies]
+tempfile = "3"
+
+# 与 heart-core 相同的 openssl 本地补丁（android no-asm；本 crate 独立 workspace 需自带）
+[patch.crates-io]
+openssl-src = { path = "../../patches/openssl-src" }
+
+[profile.release]
+lto = true
+strip = true
