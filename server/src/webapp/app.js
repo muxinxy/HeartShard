@@ -436,7 +436,7 @@ async function viewTrash() {
           <button onclick="restoreBlob('${b.blob_hash}')">恢复</button>
           <button class="danger" onclick="purgeBlob('${b.blob_hash}','${b.file_name}')">彻底删除</button>
         </td></tr>`).join("")}
-    </table>`;
+    </table>`}`;
 }
 window.restoreBlob = async (h) => { await api(`/api/blobs/${h}/restore`, { method: "POST" }); toast("已恢复"); route(); };
 window.purgeBlob = async (h, n) => {
