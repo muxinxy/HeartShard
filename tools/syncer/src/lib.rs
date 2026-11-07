@@ -24,7 +24,7 @@ pub struct DataConfig {
     pub password: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct SourceConfig {
     pub id: String,
     /// local | s3 | webdav | openlist

@@ -255,7 +255,7 @@ impl Default for Settings {
 
 /// M2 加密 manifest（冗余写入每个启用的 Storage；M3 迁移到 manifest crate）。
 #[derive(Debug, Serialize, Deserialize)]
-struct Manifest {
+pub struct Manifest {
     version: u32,
     codec: String,
     blob_sha256: String,
@@ -264,8 +264,9 @@ struct Manifest {
     n: u8,
     m: u8,
     created_at: i64,
-    file_name: String,
-    mime: String,
+    // 以下两个字段对后台/API 层公开（raw 响应头需要）
+    pub file_name: String,
+    pub mime: String,
     chunks: Vec<ManifestChunk>,
     shards: Vec<ManifestShard>,
 }

@@ -1,0 +1,37 @@
+[package]
+name = "heartshard-server"
+version = "0.1.0"
+description = "牧心后台：家庭相册自托管服务器（多用户认证 + 相册 ACL + 常驻同步引擎 + 数据 API）。"
+authors = ["HeartShard contributors"]
+edition = "2024"
+
+[[bin]]
+name = "heartshard-server"
+path = "src/main.rs"
+
+[dependencies]
+heart-core = { path = "../core-rs/crates/heart-core" }
+syncer = { package = "heartshard-syncer", path = "../tools/syncer" }
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+argon2 = "0.5"
+hex = "0.4"
+base64 = "0.22"
+getrandom = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+http-body-util = "0.1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+# 与 heart-core 相同的 openssl 本地补丁（本 crate 独立 workspace 需自带）
+[patch.crates-io]
+openssl-src = { path = "../patches/openssl-src" }
+
+[profile.release]
+lto = true
+strip = true

@@ -202,6 +202,70 @@ password = "..."
 三层 diff（path+size+mtime 快筛 → SHA-256 → 相册索引去重）；首跑即完全对账，
 之后增量；`--full` 强制重对账修复清单漂移。远端源 mtime 不可知，diff 以哈希为准。
 
+## 7.6 牧心后台 heartshard-server（M3）
+
+家庭相册自托管服务器（用户自己的 NAS/PC 上跑）。三个角色合一：**常驻同步引擎
+（复用 syncer）+ 多用户认证 + 相册 ACL + 数据 API**。
+
+安全模型（如实声明）：
+
+- **单一共享库**：后台启动用 `password_env` 解锁一个相册库（一个 MK）。成员登录
+  账户（argon2id hash 存 users.json）仅做认证与 ACL。
+- **ACL 是应用层强制**：后台按有效权限过滤 API 返回；不是密码学隔离——能直连
+  底层存储的人可解出全部照片（家庭信任场景的取舍；密码学隔离 = M5 一人一库）。
+- 权限级别 `none < view < upload < manage`；沿相册树向根继承，节点显式设置覆盖；
+  **同节点用户显式 > 组显式**；自动 family 组 = 全体用户。
+
+```toml
+# server.toml（与 users.json/groups.json/acls.json 同目录生成）
+port = 8420
+[library]
+dir = "D:\\HeartShard\\data"
+password_env = "HEARTSHARD_LIB_PW"
+sync_interval_secs = 300          # 0 = 不自动同步
+
+[[users]]
+name = "爸爸"
+password = "..."                  # 或 password_env = "..."
+admin = true
+
+[[users]]
+name = "小孩"
+password = "..."
+admin = false
+
+[[groups]]
+name = "长辈"
+members = ["爷爷"]
+
+# 同步源语法与 syncer.toml 完全一致
+[[sources]]
+id = "phone"
+kind = "local"
+root = "D:\\Photos"
+strategy = "append"
+```
+
+```powershell
+cd server
+cargo run -- --config server.toml
+```
+
+API（Bearer token，登录获得）：
+
+| 端点 | 权限 |
+|---|---|
+| `POST /api/login` · `GET /api/me` | 公开 |
+| `GET /api/albums`（只回可见相册+权限）· `POST /api/albums`（父 manage） | view+ |
+| `GET /api/albums/{id}/blobs` | view+ |
+| `POST /api/albums/{id}/upload`（multipart `file`） | upload+ |
+| `GET /api/blobs`（可见相册时间线并集）· `GET /api/blobs/{hash}/thumbnail` · `GET /api/blobs/{hash}/raw`（解密原图） | view+ |
+| `GET /api/trash` · `POST /api/blobs/{hash}/restore|purge` | admin |
+| `POST /api/albums/{id}/acl`（用户/组 × 权限，null=回退继承） | manage |
+| `POST /api/sync/run` | admin |
+
+已知限制：`/raw` 视频整段载入内存（Range 流式属 M4）；回收站操作 v1 仅 admin。
+
 ## 8. 构建/发布（产物）
 
 ### 8.1 Windows（便携 exe，不构建安装程序）
