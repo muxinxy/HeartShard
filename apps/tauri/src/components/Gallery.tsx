@@ -18,6 +18,7 @@ import {
   ImportOutcome,
   ImportRunReport,
 } from "../lib/api";
+import { useRef } from "react";
 import { BlobDetailModal } from "./BlobDetailModal";
 import { ImportWizard } from "./ImportWizard";
 import { AlbumTree } from "./AlbumTree";
@@ -25,6 +26,8 @@ import { MapView } from "./MapView";
 import { SettingsPage } from "./SettingsPage";
 import { StoragePage } from "./StoragePage";
 import { TrashPage } from "./TrashPage";
+import { HomePage } from "./HomePage";
+import { Lightbox } from "./Lightbox";
 import { Thumb } from "./Thumb";
 import { TaskPanel, TaskProvider, useTasks } from "./TaskPanel";
 import { useToast } from "./Toast";
@@ -54,9 +57,16 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [favOnly, setFavOnly] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
-  // 右键菜单 / 相册选择弹窗 / 重命名弹窗
+  // 首页（相册封面墙）/ 全屏查看器 / 多选模式
+  const [homeOpen, setHomeOpen] = useState(true);
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const listRef = useRef<any>(null);
+  const gridRef = useRef<any>(null);
+  // 右键菜单 / 相册选择弹窗（可批量）/ 重命名弹窗
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; blob: BlobEntry } | null>(null);
-  const [albumPicker, setAlbumPicker] = useState<BlobEntry | null>(null);
+  const [albumPickerHashes, setAlbumPickerHashes] = useState<string[] | null>(null);
   const [renameModal, setRenameModal] = useState<BlobEntry | null>(null);
   const [renameVal, setRenameVal] = useState("");
 
@@ -348,18 +358,112 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     return favOnly ? base.filter((b) => b.favorite) : base;
   }, [selectedAlbum, albumBlobs, blobs, favOnly]);
 
-  // 按拍摄/修改时间倒序 + 日期分组（列表视图用）
+  // 按月分组（时间线导航芯片条：跳转到该月第一张）
+  const months = useMemo(() => {
+    const out: { key: string; label: string; firstIdx: number; count: number }[] = [];
+    let cur: { key: string; label: string; firstIdx: number; count: number } | null = null;
+    displayBlobs.forEach((b, i) => {
+      const d = new Date(b.taken_at * 1000);
+      const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+      const label = `${d.getFullYear()} 年 ${d.getMonth() + 1} 月`;
+      if (cur && cur.key === key) {
+        cur.count++;
+      } else {
+        cur = { key, label, firstIdx: i, count: 1 };
+        out.push(cur);
+      }
+    });
+    return out;
+  }, [displayBlobs]);
+
+  const jumpToMonth = (firstIdx: number) => {
+    (gridRef.current ?? listRef.current)?.scrollToIndex?.({ index: firstIdx, align: "start" });
+  };
+
+  // ---------------- 多选批量操作 ----------------
+  const toggleSelect = (hash: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(hash)) next.delete(hash);
+      else next.add(hash);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
+
+  const batchFavorite = async () => {
+    const hashes = [...selected];
+    let ok = 0;
+    for (const h of hashes) {
+      await api.setBlobFavorite(h, true).then(() => ok++).catch(() => {});
+    }
+    toast.success(`已收藏 ${ok} 张`);
+    exitSelectMode();
+    await reloadAll();
+  };
+
+  const batchDownload = async () => {
+    const dir = await api.pickDirectory();
+    if (!dir) return;
+    const hashes = [...selected];
+    let ok = 0;
+    const failed: string[] = [];
+    for (const h of hashes) {
+      const blob = displayBlobs.find((b) => b.blob_hash === h);
+      if (!blob) continue;
+      try {
+        await api.exportBlob(h, `${dir}\\${blob.file_name}`);
+        ok++;
+      } catch {
+        failed.push(blob.file_name);
+      }
+    }
+    if (failed.length > 0) {
+      toast.error(`导出 ${ok} 张，失败 ${failed.length}：${failed.slice(0, 3).join("、")}`);
+    } else {
+      toast.success(`已导出 ${ok} 张到所选目录`);
+    }
+    exitSelectMode();
+  };
+
+  const batchDelete = async () => {
+    if (!window.confirm(`把选中的 ${selected.size} 张照片移入回收站吗？碎片保留，可恢复。`)) return;
+    for (const h of selected) {
+      await api.deleteBlob(h).catch(() => {});
+    }
+    toast.success(`已移入回收站 ${selected.size} 张`);
+    exitSelectMode();
+    await reloadAll();
+  };
+
+  // 点击网格/列表条目的统一入口
+  const openOrToggle = (b: BlobEntry, index: number) => {
+    if (selectMode) {
+      toggleSelect(b.blob_hash);
+    } else {
+      setLightboxIdx(index);
+    }
+  };
+
+  // 按拍摄/修改时间倒序 + 日期分组（列表视图用；blob 项携带 displayBlobs 索引供灯箱跳转）
   const items = useMemo(() => {
-    const out: Array<{ type: "header"; key: string; label: string } | { type: "blob"; key: string; blob: BlobEntry }> = [];
+    const out: Array<
+      | { type: "header"; key: string; label: string }
+      | { type: "blob"; key: string; blob: BlobEntry; idx: number }
+    > = [];
     let lastDate = "";
-    for (const b of displayBlobs) {
+    displayBlobs.forEach((b, idx) => {
       const key = b.taken_at ? new Date(b.taken_at * 1000).toLocaleDateString() : "未知日期";
       if (key !== lastDate) {
         out.push({ type: "header", key: `h-${key}`, label: key });
         lastDate = key;
       }
-      out.push({ type: "blob", key: b.blob_hash, blob: b });
-    }
+      out.push({ type: "blob", key: b.blob_hash, blob: b, idx });
+    });
     return out;
   }, [displayBlobs]);
 
@@ -423,11 +527,26 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     );
   }
 
+  if (homeOpen) {
+    return (
+      <HomePage
+        albums={albums}
+        total={blobs.length}
+        latestHash={blobs[0]?.blob_hash ?? null}
+        onOpen={(albumId) => {
+          setSelectedAlbum(albumId ?? "");
+          setHomeOpen(false);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="gallery">
       <header className="toolbar">
         <div className="toolbar-row">
           <span className="brand">牧心相册</span>
+          <button onClick={() => setHomeOpen(true)}>🏠 首页</button>
           <select
             className="album-select"
             value={selectedAlbum}
@@ -449,6 +568,12 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           </button>
           <button onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}>
             {viewMode === "grid" ? "▦ 网格" : "☰ 列表"}
+          </button>
+          <button
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            className={selectMode ? "fav-on" : ""}
+          >
+            {selectMode ? "✕ 退出选择" : "☑ 选择"}
           </button>
           <span className="spacer" />
           <button onClick={doLock} className="secondary">
@@ -543,6 +668,16 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </div>
       )}
 
+      {months.length > 1 && displayBlobs.length > 0 && (
+        <div className="month-bar">
+          {months.map((m) => (
+            <button key={m.key} onClick={() => jumpToMonth(m.firstIdx)}>
+              {m.label}（{m.count}）
+            </button>
+          ))}
+        </div>
+      )}
+
       {displayBlobs.length === 0 ? (
         <div className="empty">
           {selectedAlbum ? (
@@ -559,7 +694,8 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </div>
       ) : viewMode === "grid" ? (
         <VirtuosoGrid
-          style={{ height: "calc(100vh - 190px)", paddingTop: 8 }}
+          ref={gridRef}
+          style={{ height: "calc(100vh - 240px)", paddingTop: 8 }}
           totalCount={displayBlobs.length}
           listClassName="photo-grid"
           itemClassName="photo-cell"
@@ -567,8 +703,8 @@ export function Gallery({ onLock }: { onLock: () => void }) {
             const b = displayBlobs[index];
             return (
               <div
-                className="photo-cell-inner"
-                onClick={() => setDetailBlob(b)}
+                className={`photo-cell-inner ${selectMode && selected.has(b.blob_hash) ? "cell-selected" : ""}`}
+                onClick={() => openOrToggle(b, index)}
                 onContextMenu={(e) => openCtx(e, b)}
                 title={`${b.file_name} · ${formatBytes(b.total_len)}`}
               >
@@ -577,13 +713,19 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                   {b.favorite && <span style={{ color: "#f0b45c" }}>♥ </span>}
                   {b.file_name}
                 </span>
+                {selectMode && (
+                  <span className={`cell-check ${selected.has(b.blob_hash) ? "on" : ""}`}>
+                    {selected.has(b.blob_hash) ? "✓" : ""}
+                  </span>
+                )}
               </div>
             );
           }}
         />
       ) : (
         <Virtuoso
-          style={{ height: "calc(100vh - 140px)", paddingTop: 8 }}
+          ref={listRef}
+          style={{ height: "calc(100vh - 240px)", paddingTop: 8 }}
           totalCount={items.length}
           itemContent={(index: number) => {
             const item = items[index];
@@ -597,9 +739,9 @@ export function Gallery({ onLock }: { onLock: () => void }) {
             const b = item.blob;
             return (
               <div
-                className="blob-row"
+                className={`blob-row ${selectMode && selected.has(b.blob_hash) ? "cell-selected" : ""}`}
                 style={{ cursor: "pointer" }}
-                onClick={() => setDetailBlob(b)}
+                onClick={() => openOrToggle(b, item.idx)}
                 onContextMenu={(e) => openCtx(e, b)}
               >
                 <Thumb blobHash={b.blob_hash} mime={b.mime} />
@@ -618,6 +760,40 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                 </div>
               </div>
             );
+          }}
+        />
+      )}
+
+      {/* 多选批量操作条 */}
+      {selectMode && (
+        <div className="selection-bar">
+          <span className="sel-count">已选 {selected.size} 张</span>
+          <button onClick={() => selected.size === displayBlobs.length ? setSelected(new Set()) : setSelected(new Set(displayBlobs.map((b) => b.blob_hash)))}>
+            {selected.size === displayBlobs.length ? "取消全选" : "全选"}
+          </button>
+          <button onClick={batchFavorite} disabled={selected.size === 0}>♥ 收藏</button>
+          <button
+            disabled={selected.size === 0}
+            onClick={() => setAlbumPickerHashes([...selected])}
+          >
+            📁 添加到相册
+          </button>
+          <button onClick={batchDownload} disabled={selected.size === 0}>⬇ 下载</button>
+          <button className="danger" onClick={batchDelete} disabled={selected.size === 0}>🗑 删除</button>
+          <button onClick={exitSelectMode}>退出</button>
+        </div>
+      )}
+
+      {/* 全屏查看器 */}
+      {lightboxIdx !== null && displayBlobs.length > 0 && (
+        <Lightbox
+          blobs={displayBlobs}
+          index={Math.min(lightboxIdx, displayBlobs.length - 1)}
+          onClose={() => setLightboxIdx(null)}
+          onNavigate={setLightboxIdx}
+          onInfo={(b) => {
+            setLightboxIdx(null);
+            setDetailBlob(b);
           }}
         />
       )}
@@ -655,7 +831,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
             <button onClick={() => ctxToggleFav(ctxMenu.blob)}>
               {ctxMenu.blob.favorite ? "♥ 取消收藏" : "♡ 收藏"}
             </button>
-            <button onClick={() => { setAlbumPicker(ctxMenu.blob); setCtxMenu(null); }}>
+            <button onClick={() => { setAlbumPickerHashes([ctxMenu.blob.blob_hash]); setCtxMenu(null); }}>
               📁 添加到相册…
             </button>
             {selectedAlbum && (
@@ -668,14 +844,16 @@ export function Gallery({ onLock }: { onLock: () => void }) {
         </>
       )}
 
-      {/* 添加到相册弹窗 */}
-      {albumPicker && (
-        <div className="modal-backdrop" onClick={() => setAlbumPicker(null)}>
+      {/* 添加到相册弹窗（支持批量：右键单张或多选操作条） */}
+      {albumPickerHashes && (
+        <div className="modal-backdrop" onClick={() => setAlbumPickerHashes(null)}>
           <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
             <header className="modal-head">
-              <span className="name">添加「{albumPicker.file_name}」到相册</span>
+              <span className="name">
+                添加到相册（{albumPickerHashes.length} 张）
+              </span>
               <span className="spacer" />
-              <button onClick={() => setAlbumPicker(null)}>✕</button>
+              <button onClick={() => setAlbumPickerHashes(null)}>✕</button>
             </header>
             {albums.length === 0 ? (
               <p className="hint">还没有相册。请先到「相册管理」创建一个。</p>
@@ -686,13 +864,12 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                     <span className="name">📁 {a.name}</span>
                     <button
                       onClick={async () => {
-                        try {
-                          await api.albumAddBlob(a.id, albumPicker.blob_hash);
-                          toast.success(`已添加到「${a.name}」`);
-                          await reloadAll();
-                        } catch (e) {
-                          setError(String(e));
+                        let ok = 0;
+                        for (const h of albumPickerHashes) {
+                          await api.albumAddBlob(a.id, h).then(() => ok++).catch(() => {});
                         }
+                        toast.success(`已添加 ${ok} 张到「${a.name}」`);
+                        await reloadAll();
                       }}
                     >
                       添加

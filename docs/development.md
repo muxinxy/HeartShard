@@ -199,6 +199,17 @@ pnpm tauri android build --apk --target aarch64
 # 产物：src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release.apk
 ```
 
+**推荐：用固化脚本构建**（2026-11-07 起）：
+
+```powershell
+.\scripts\build-android-apk.ps1            # cargo 交叉编译 + 资产同步 + gradle，一步到位
+.\scripts\build-android-apk.ps1 -SkipRust  # 仅前端改动后重打包（跳过 cargo）
+```
+
+脚本会**验证 APK 内含 assets/index.html**——曾出现"tauri CLI 在 symlink 步失败导致
+前端资产从未入包（Android 白屏空壳 APK）"的事故，手动 gradle 打包必踩此坑。
+```
+
 **无管理员/开发者模式时的备选路线**（2026-11-02 实战验证）：
 `pnpm tauri android build` 的最后一步需要创建符号链接（把 `libtauri_lib.so` 链入
 `jniLibs`），非管理员会在此失败。绕过方法（本项目 buildSrc 已内置支持）：

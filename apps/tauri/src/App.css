@@ -478,6 +478,186 @@ h1, h2, h3 { color: var(--foreground); }
 }
 .fav-on { color: #f0b45c !important; border-color: #f0b45c !important; }
 
+/* ---------- 月份导航芯片条 ---------- */
+.month-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 2px 2px;
+  flex-shrink: 0;
+}
+.month-bar button {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.month-bar button:hover { border-color: var(--ring); }
+
+/* ---------- 多选模式 ---------- */
+.cell-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: transparent;
+  pointer-events: none;
+}
+.cell-check.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.cell-selected {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+}
+.selection-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 18px;
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  flex-wrap: wrap;
+  max-width: 92vw;
+}
+.selection-bar .sel-count { font-weight: 600; margin-right: 6px; }
+.selection-bar button {
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 14px;
+  cursor: pointer;
+}
+.selection-bar button:hover { border-color: var(--ring); }
+.selection-bar button:disabled { opacity: 0.45; cursor: default; }
+.selection-bar button.danger { color: var(--destructive); }
+
+/* ---------- 相册封面墙（首页） ---------- */
+.album-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+.album-card {
+  cursor: pointer;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  transition: transform 0.12s, border-color 0.12s;
+}
+.album-card:hover { transform: translateY(-2px); border-color: var(--ring); }
+.album-cover {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--input);
+  display: grid;
+  place-items: center;
+}
+.album-cover .thumb { width: 100%; height: 100%; border-radius: 0; }
+.album-card-name {
+  padding: 10px 12px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.album-card-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  flex-shrink: 0;
+}
+
+/* ---------- 全屏查看器 ---------- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.96);
+  display: flex;
+  flex-direction: column;
+}
+.lightbox-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  color: #ddd;
+  flex-shrink: 0;
+}
+.lightbox-title { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lightbox-pos { color: #888; font-size: 13px; flex-shrink: 0; }
+.lightbox-top button {
+  background: none;
+  border: 1px solid #444;
+  color: #ddd;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+}
+.lightbox-top button:hover { border-color: #888; }
+.lightbox-stage {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  cursor: grab;
+}
+.lightbox-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  user-select: none;
+  transition: transform 0.08s linear;
+}
+.lightbox-stage video { max-width: 96%; max-height: 100%; border-radius: 8px; }
+.lb-arrow {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1001;
+  background: rgba(0, 0, 0, 0.45);
+  border: none;
+  color: #eee;
+  font-size: 56px;
+  line-height: 1;
+  width: 64px;
+  height: 96px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.lb-arrow:hover { background: rgba(0, 0, 0, 0.7); }
+.lb-left { left: 12px; }
+.lb-right { right: 12px; }
+
 /* ---------- 照片右键菜单 ---------- */
 .menu-overlay { position: fixed; inset: 0; z-index: 900; }
 .ctx-menu {
