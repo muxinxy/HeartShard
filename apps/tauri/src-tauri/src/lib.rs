@@ -87,6 +87,7 @@ pub fn run() {
             commands::album_set_cover,
             commands::list_album_blobs,
             commands::album_add_blob,
+            commands::album_remove_blob,
             commands::rename_blob,
             commands::set_blob_favorite,
             commands::delete_blob,

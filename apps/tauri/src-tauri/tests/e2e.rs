@@ -150,6 +150,13 @@ fn photo_lifecycle_rename_favorite_trash_album() {
     assert_eq!(album_blobs.len(), 1);
     assert_eq!(album_blobs[0].blob_hash, blob_hash);
 
+    // 从相册移除：照片本体保留，相册内容清空
+    core.album_remove_blob(&album_id, &blob_hash).unwrap();
+    assert!(core.list_album_blobs(&album_id).unwrap().is_empty());
+    assert_eq!(core.list_blobs().unwrap().len(), 1);
+    core.album_add_blob(&album_id, &blob_hash).unwrap();
+    assert_eq!(core.list_album_blobs(&album_id).unwrap().len(), 1);
+
     // 256px 缩略图（导入期缓存或按需生成）
     assert!(core.thumbnail_cached(&blob_hash).unwrap().is_some());
     // 1024px 大图：缓存未命中 → 解密按需生成 → 落加密缓存

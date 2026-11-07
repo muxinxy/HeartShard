@@ -998,6 +998,26 @@ impl HeartCore {
         Ok(())
     }
 
+    /// 从相册移除照片（blob_albums 墓碑；照片本体不受影响，随增量同步）。
+    pub fn album_remove_blob(&self, album_id: &str, blob_hash: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let lamport = db.lamport()? + 1;
+        let record = BlobAlbumRecord {
+            blob_hash: blob_hash.to_lowercase(),
+            album_id: album_id.to_string(),
+            added_at: now_secs(),
+            deleted_at: Some(now_secs()),
+        };
+        db.upsert_blob_album(&Versioned {
+            lamport,
+            device_id: me,
+            record,
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
     // ---------------- 照片操作（相册应用核心交互） ----------------
 
     /// 重命名照片（展示名；LWW 随增量同步）。

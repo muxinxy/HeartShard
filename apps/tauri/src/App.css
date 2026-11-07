@@ -478,6 +478,34 @@ h1, h2, h3 { color: var(--foreground); }
 }
 .fav-on { color: #f0b45c !important; border-color: #f0b45c !important; }
 
+/* ---------- 照片右键菜单 ---------- */
+.menu-overlay { position: fixed; inset: 0; z-index: 900; }
+.ctx-menu {
+  position: fixed;
+  z-index: 901;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  padding: 4px;
+}
+.ctx-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 9px 14px;
+  font-size: 14px;
+  color: var(--foreground);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.ctx-menu button:hover { background: var(--secondary); }
+.ctx-menu button.danger { color: var(--destructive); }
+
 /* ---------- 高级详情折叠（加密/分片） ---------- */
 .tech-details {
   margin-top: 16px;

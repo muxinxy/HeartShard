@@ -1,6 +1,12 @@
 // 时间线/网格（Virtuoso 虚拟滚动 + 懒加载缩略图）+ 工具栏（导入/向导/同步/再平衡/
 // 一键体检）+ 相册选择与上传 + 拖拽导入 + 详情模态（分片分布）+ 历史报告重开。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { Virtuoso, VirtuosoGrid } from "react-virtuoso";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
@@ -48,6 +54,11 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [favOnly, setFavOnly] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  // 右键菜单 / 相册选择弹窗 / 重命名弹窗
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; blob: BlobEntry } | null>(null);
+  const [albumPicker, setAlbumPicker] = useState<BlobEntry | null>(null);
+  const [renameModal, setRenameModal] = useState<BlobEntry | null>(null);
+  const [renameVal, setRenameVal] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -227,6 +238,88 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     await api.lock();
     onLock();
   };
+
+  // 刷新主列表 + 当前相册内容
+  const reloadAll = useCallback(async () => {
+    await refresh();
+    if (selectedAlbum) {
+      const list = await api.listAlbumBlobs(selectedAlbum).catch(() => []);
+      setAlbumBlobs(list);
+    }
+  }, [refresh, selectedAlbum]);
+
+  // ---------------- 右键菜单 ----------------
+  const openCtx = (e: ReactMouseEvent, blob: BlobEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({
+      x: Math.min(e.clientX, window.innerWidth - 200),
+      y: Math.min(e.clientY, window.innerHeight - 340),
+      blob,
+    });
+  };
+
+  const ctxToggleFav = async (b: BlobEntry) => {
+    setCtxMenu(null);
+    try {
+      await api.setBlobFavorite(b.blob_hash, !b.favorite);
+      await reloadAll();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const ctxRemoveFromAlbum = async (b: BlobEntry) => {
+    setCtxMenu(null);
+    try {
+      await api.albumRemoveBlob(selectedAlbum, b.blob_hash);
+      toast.success(`已从相册移除`);
+      await reloadAll();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const ctxDelete = async (b: BlobEntry) => {
+    setCtxMenu(null);
+    if (!window.confirm(`把「${b.file_name}」移入回收站吗？碎片仍保留，可随时恢复。`)) return;
+    try {
+      await api.deleteBlob(b.blob_hash);
+      toast.success("已移入回收站");
+      await reloadAll();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const startRename = (b: BlobEntry) => {
+    setCtxMenu(null);
+    setRenameVal(b.file_name);
+    setRenameModal(b);
+  };
+
+  const doRenameModal = async () => {
+    if (!renameModal || !renameVal.trim()) return;
+    try {
+      await api.renameBlob(renameModal.blob_hash, renameVal.trim());
+      setRenameModal(null);
+      await reloadAll();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  // Esc 关闭右键菜单 / 更多菜单
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setCtxMenu(null);
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const applyTheme = () => {
     api.getSettings().then((s) => {
@@ -476,10 +569,14 @@ export function Gallery({ onLock }: { onLock: () => void }) {
               <div
                 className="photo-cell-inner"
                 onClick={() => setDetailBlob(b)}
+                onContextMenu={(e) => openCtx(e, b)}
                 title={`${b.file_name} · ${formatBytes(b.total_len)}`}
               >
                 <Thumb blobHash={b.blob_hash} mime={b.mime} />
-                <span className="cell-label">{b.file_name}</span>
+                <span className="cell-label">
+                  {b.favorite && <span style={{ color: "#f0b45c" }}>♥ </span>}
+                  {b.file_name}
+                </span>
               </div>
             );
           }}
@@ -503,6 +600,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                 className="blob-row"
                 style={{ cursor: "pointer" }}
                 onClick={() => setDetailBlob(b)}
+                onContextMenu={(e) => openCtx(e, b)}
               >
                 <Thumb blobHash={b.blob_hash} mime={b.mime} />
                 <div className="blob-main">
@@ -532,17 +630,107 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           onPreview={doPreview}
           onChanged={(b) => {
             setDetailBlob(b);
-            refresh();
+            reloadAll();
           }}
           onDeleted={() => {
             setDetailBlob(null);
-            refresh().then(() => {
-              if (selectedAlbum) {
-                api.listAlbumBlobs(selectedAlbum).then(setAlbumBlobs).catch(() => {});
-              }
-            });
+            reloadAll();
           }}
         />
+      )}
+
+      {/* 照片右键菜单 */}
+      {ctxMenu && (
+        <>
+          <div
+            className="menu-overlay"
+            onClick={() => setCtxMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtxMenu(null);
+            }}
+          />
+          <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+            <button onClick={() => { setCtxMenu(null); doPreview(ctxMenu.blob); }}>🔍 预览</button>
+            <button onClick={() => ctxToggleFav(ctxMenu.blob)}>
+              {ctxMenu.blob.favorite ? "♥ 取消收藏" : "♡ 收藏"}
+            </button>
+            <button onClick={() => { setAlbumPicker(ctxMenu.blob); setCtxMenu(null); }}>
+              📁 添加到相册…
+            </button>
+            {selectedAlbum && (
+              <button onClick={() => ctxRemoveFromAlbum(ctxMenu.blob)}>➖ 从本相册移除</button>
+            )}
+            <button onClick={() => startRename(ctxMenu.blob)}>✏️ 重命名</button>
+            <button onClick={() => { setCtxMenu(null); doExport(ctxMenu.blob); }}>⬇ 下载 / 分享</button>
+            <button className="danger" onClick={() => ctxDelete(ctxMenu.blob)}>🗑 移入回收站</button>
+          </div>
+        </>
+      )}
+
+      {/* 添加到相册弹窗 */}
+      {albumPicker && (
+        <div className="modal-backdrop" onClick={() => setAlbumPicker(null)}>
+          <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
+            <header className="modal-head">
+              <span className="name">添加「{albumPicker.file_name}」到相册</span>
+              <span className="spacer" />
+              <button onClick={() => setAlbumPicker(null)}>✕</button>
+            </header>
+            {albums.length === 0 ? (
+              <p className="hint">还没有相册。请先到「相册管理」创建一个。</p>
+            ) : (
+              <ul className="album-list">
+                {albums.map((a) => (
+                  <li key={a.id} className="album-row">
+                    <span className="name">📁 {a.name}</span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api.albumAddBlob(a.id, albumPicker.blob_hash);
+                          toast.success(`已添加到「${a.name}」`);
+                          await reloadAll();
+                        } catch (e) {
+                          setError(String(e));
+                        }
+                      }}
+                    >
+                      添加
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 重命名弹窗 */}
+      {renameModal && (
+        <div className="modal-backdrop" onClick={() => setRenameModal(null)}>
+          <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
+            <header className="modal-head">
+              <span className="name">重命名照片</span>
+              <span className="spacer" />
+              <button onClick={() => setRenameModal(null)}>✕</button>
+            </header>
+            <div className="settings-card">
+              <input
+                value={renameVal}
+                autoFocus
+                style={{ width: "100%" }}
+                onChange={(e) => setRenameVal(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && doRenameModal()}
+              />
+              <button className="primary" onClick={doRenameModal} disabled={!renameVal.trim()}>
+                确定
+              </button>
+              <button style={{ marginLeft: 8 }} onClick={() => setRenameModal(null)}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

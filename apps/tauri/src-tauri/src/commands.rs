@@ -384,6 +384,15 @@ pub fn album_add_blob(
 }
 
 #[tauri::command]
+pub fn album_remove_blob(
+    album_id: String,
+    blob_hash: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.core.lock().unwrap().album_remove_blob(&album_id, &blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
 pub fn rename_blob(blob_hash: String, new_name: String, state: State<'_, SessionState>) -> Result<(), String> {
     state.core.lock().unwrap().rename_blob(&blob_hash, &new_name).map_err(err_str)
 }

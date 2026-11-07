@@ -212,6 +212,8 @@ export const api = {
     invoke<BlobEntry[]>("list_album_blobs", { albumId }),
   albumAddBlob: (albumId: string, blobHash: string) =>
     invoke<void>("album_add_blob", { albumId, blobHash }),
+  albumRemoveBlob: (albumId: string, blobHash: string) =>
+    invoke<void>("album_remove_blob", { albumId, blobHash }),
   renameBlob: (blobHash: string, newName: string) =>
     invoke<void>("rename_blob", { blobHash, newName }),
   setBlobFavorite: (blobHash: string, favorite: boolean) =>

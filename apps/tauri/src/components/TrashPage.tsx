@@ -20,6 +20,16 @@ export function TrashPage({ onDone }: { onDone: () => void }) {
     refresh();
   }, [refresh]);
 
+  const doPreview = async (b: BlobEntry) => {
+    setError(null);
+    try {
+      const result = await api.previewBlob(b.blob_hash);
+      await api.openPathSystem(result.path);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const doRestore = async (b: BlobEntry) => {
     setBusy(true);
     try {
@@ -73,6 +83,7 @@ export function TrashPage({ onDone }: { onDone: () => void }) {
                 </span>
               </div>
               <div className="blob-actions">
+                <button onClick={() => doPreview(b)} disabled={busy}>预览</button>
                 <button onClick={() => doRestore(b)} disabled={busy}>恢复</button>
                 <button onClick={() => doPurge(b)} disabled={busy} style={{ color: "var(--destructive)" }}>
                   彻底删除
