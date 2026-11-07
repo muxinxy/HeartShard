@@ -1,10 +1,9 @@
-// Service Worker：静态壳 cache-first（登录与数据 API 永不缓存——密文/明文数据都走网络直连）。
-const SHELL = "hs-shell-v1";
+// Service Worker：静态壳「网络优先、离线回退」——保证服务器更新后前端立刻生效；
+// 旧版本号缓存会在 activate 时清空。数据（/api、/s、缩略图/原图）永不缓存。
+const SHELL = "hs-shell-v2";
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(SHELL).then((c) => c.addAll(["/", "/app.js", "/manifest.webmanifest"]))
-  );
+  e.waitUntil(caches.open(SHELL));
   self.skipWaiting();
 });
 
@@ -19,21 +18,19 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  // 只缓存静态壳；/api、/s、缩略图/原图一律直连网络
+  // 只处理静态壳；/api、/s、缩略图/原图一律直连网络（不拦截）
   if (e.request.method !== "GET" || url.pathname.startsWith("/api") || url.pathname.startsWith("/s/")) {
-    return; // 不拦截，浏览器默认行为
+    return;
   }
   if (url.pathname === "/" || url.pathname === "/app.js" || url.pathname === "/manifest.webmanifest") {
     e.respondWith(
-      caches.match(e.request).then(
-        (hit) =>
-          hit ||
-          fetch(e.request).then((res) => {
-            const copy = res.clone();
-            caches.open(SHELL).then((c) => c.put(e.request, copy));
-            return res;
-          })
-      )
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(SHELL).then((c) => c.put(e.request, copy));
+          return res;
+        })
+        .catch(() => caches.match(e.request).then((hit) => hit || Response.error()))
     );
   }
 });
