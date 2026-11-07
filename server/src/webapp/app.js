@@ -67,16 +67,25 @@ function uiForm(title, fields, onOk) {
     try { await onOk(vals); } catch (e) { toast(e.message, true); }
   };
 }
-// 鼠标位置右键菜单
+// 鼠标位置右键菜单（按索引分发，避免闭包源码字符串化丢变量）
+let ctxItems = [];
 function ctxMenu(x, y, items) {
   const root = $("ctx-root");
+  ctxItems = items;
   const w = 190;
   const px = Math.min(x, window.innerWidth - w - 8);
   const py = Math.min(y, window.innerHeight - items.length * 42 - 12);
   root.innerHTML = `<div class="menu-overlay" onclick="closeCtx()"></div>
     <div class="ctx-menu" style="left:${px}px;top:${py}px">
-      ${items.map((it) => `<button class="${it.danger ? "danger" : ""}" onclick="closeCtx();(${it.fn})()">${it.label}</button>`).join("")}
+      ${items.map((it, i) => `<button class="${it.danger ? "danger" : ""}" data-i="${i}">${it.label}</button>`).join("")}
     </div>`;
+  root.querySelectorAll(".ctx-menu button").forEach((btn) => {
+    btn.onclick = () => {
+      const fn = ctxItems[Number(btn.dataset.i)].fn;
+      closeCtx();
+      fn();
+    };
+  });
 }
 function closeCtx() { $("ctx-root").innerHTML = ""; }
 window.closeCtx = closeCtx;
@@ -258,7 +267,9 @@ function renderSelbar() {
     bar.innerHTML = `
       <span style="font-weight:600">已选 <span id="sel-count">0</span> 张</span>
       <button id="sel-fav">⭐ 收藏</button>
+      <button id="sel-rename">✏️ 重命名</button>
       <button id="sel-share">🔗 分享</button>
+      <button id="sel-detail">ℹ️ 详情</button>
       <button id="sel-download">⬇ 下载</button>
       <button id="sel-move">↪ 移动到</button>
       <button id="sel-copy">⧉ 复制到</button>
@@ -266,6 +277,12 @@ function renderSelbar() {
       <button id="sel-cancel">取消</button>`;
     document.body.appendChild(bar);
     $("sel-fav").onclick = () => batch((h) => api(`/api/blobs/${h}/favorite`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ favorite: true }) }), "已收藏");
+    $("sel-rename").onclick = batchRenameDialog;
+    $("sel-share").onclick = () => shareDialog([...selected]);
+    $("sel-detail").onclick = () => {
+      const first = blobs.find((b) => selected.has(b.blob_hash));
+      if (first) showBlobDetail(first);
+    };
     $("sel-trash").onclick = () => uiConfirm("移入回收站", `把选中的 ${selected.size} 张照片移入回收站？碎片保留，可恢复。`, async () => {
       await batch((h) => api(`/api/blobs/${h}/delete`, { method: "POST" }), "已移入回收站");
       route();
@@ -276,10 +293,9 @@ function renderSelbar() {
         if (b) await downloadBlob(h, b.file_name);
       }
     };
-    $("sel-share").onclick = shareSelected;
-    $("sel-cancel").onclick = () => { clearSelection(); route(); };
     $("sel-move").onclick = () => pickAlbumThen("move");
     $("sel-copy").onclick = () => pickAlbumThen("copy");
+    $("sel-cancel").onclick = () => { clearSelection(); route(); };
   }
   $("sel-count").textContent = selected.size;
 }
@@ -370,18 +386,19 @@ function filteredBlobs() {
 }
 // 按天分组（时间线细分到天；间隔 > 45 天插入月份隔断）
 function groupByDay(list) {
-  const out = []; // {type:sep|day, label, items?}
+  const out = []; // {type:sep|day, key, label, items?}
   let lastDate = null;
   for (const b of list) {
     const d = b.taken_at ? new Date(b.taken_at * 1000) : null;
-    const key = d ? d.toDateString() : "未知日期";
+    const key = d ? d.toDateString() : "unknown";
+    const label = d ? d.toLocaleDateString() : "未知日期";
     // 稀疏隔断：与上一张相隔 > 45 天 → 插入年月隔断
     if (d && lastDate && (d - lastDate) / 86400000 > 45) {
       out.push({ type: "sep", label: `${d.getFullYear()} 年 ${d.getMonth() + 1} 月` });
     }
-    let g = out.find((x) => x.type === "day" && x.label === key);
+    let g = out.find((x) => x.type === "day" && x.key === key);
     if (!g) {
-      g = { type: "day", label: key, date: d, items: [] };
+      g = { type: "day", key, label, date: d, items: [] };
       out.push(g);
     }
     g.items.push(b);
@@ -414,8 +431,10 @@ function renderPhotoGrid() {
       if (g.date && !document.querySelector(`[data-anchor="${g.date.getFullYear()}"]`)) header.setAttribute("data-anchor", g.date.getFullYear());
       // 当天全选/取消全选
       const allIn = g.items.every((b) => selected.has(b.blob_hash));
-      header.innerHTML = `<label style="cursor:pointer"><input type="checkbox" ${allIn ? "checked" : ""} onchange="toggleDay('${g.label}', this.checked)"> ${g.label}</label>
+      header.innerHTML = `<label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          <input type="checkbox" data-day="${g.key}" ${allIn ? "checked" : ""}> ${g.label}</label>
         <span class="hint" style="margin-left:8px">${g.items.length} 张</span>`;
+      header.querySelector("input").onchange = (e) => toggleDay(g, e.target.checked);
       v.appendChild(header);
       const grid = document.createElement("div");
       grid.className = "grid";
@@ -445,15 +464,14 @@ function renderPhotoGrid() {
     el.onclick = () => document.querySelector(`[data-anchor="${el.dataset.year}"]`)?.scrollIntoView({ behavior: "smooth" });
   });
 }
-window.toggleDay = (label, checked) => {
-  const list = filteredBlobs();
-  for (const b of list) {
-    const d = b.taken_at ? new Date(b.taken_at * 1000).toLocaleDateString() : "未知日期";
-    if (d === label) checked ? selected.add(b.blob_hash) : selected.delete(b.blob_hash);
+function toggleDay(group, checked) {
+  for (const b of group.items) {
+    checked ? selected.add(b.blob_hash) : selected.delete(b.blob_hash);
   }
   renderSelbar();
+  // 更新该天勾选状态（不整页重渲染，保留滚动位置）
   renderPhotoGrid();
-};
+}
 function photoCell(b) {
   const cell = document.createElement("div");
   cell.className = "cell" + (selected.has(b.blob_hash) ? " sel" : "");
@@ -534,25 +552,80 @@ window.delBlob = (hash, name) => {
   }, true);
 };
 
-// ---------------- 灯箱 ----------------
+// ---------------- 灯箱（缩放以鼠标为中心 / 旋转以屏幕中心 / 拖拽平移 / 视频支持） ----------------
 const viewer = $("viewer");
 const lbImg = $("full-img");
-let lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1 };
+let lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1, ox: 0, oy: 0 };
 let lbCurrent = null;
 function lbTransform() {
-  lbImg.style.transform = `scale(${lbState.zoom}) rotate(${lbState.rotate}deg) scale(${lbState.flipH}, ${lbState.flipV})`;
+  lbImg.style.transform = `translate(${lbState.ox}px, ${lbState.oy}px) rotate(${lbState.rotate}deg) scale(${lbState.zoom * lbState.flipH}, ${lbState.zoom * lbState.flipV})`;
 }
 function openViewer(b) {
-  if (!b.mime.startsWith("image/")) { toast("视频请用桌面/安卓客户端在线播放", true); return; }
   lbCurrent = b;
-  lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1 };
+  lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1, ox: 0, oy: 0 };
   lbTransform();
   $("lb-title").textContent = b.file_name;
   $("lb-fav").textContent = b.favorite ? "♥ 已收藏" : "♡ 收藏";
-  $("full-img").src = `/api/blobs/${b.blob_hash}/raw?token=${encodeURIComponent(token)}`;
+  const url = `/api/blobs/${b.blob_hash}/raw?token=${encodeURIComponent(token)}`;
+  if (b.mime.startsWith("video/")) {
+    // 视频用 <video> 在线播放（解密字节流直接喂给 video 元素）
+    lbImg.style.display = "none";
+    let vid = $("lb-video");
+    if (!vid) {
+      vid = document.createElement("video");
+      vid.id = "lb-video";
+      vid.controls = true;
+      vid.style.maxWidth = "96%";
+      vid.style.maxHeight = "100%";
+      $("lb-stage").appendChild(vid);
+    }
+    vid.style.display = "block";
+    vid.src = url;
+  } else {
+    lbImg.style.display = "block";
+    const vid = $("lb-video");
+    if (vid) { vid.pause?.(); vid.style.display = "none"; }
+    lbImg.src = url;
+  }
   viewer.style.display = "flex";
 }
-function closeViewer() { viewer.style.display = "none"; lbCurrent = null; }
+function closeViewer() {
+  viewer.style.display = "none";
+  const vid = $("lb-video");
+  if (vid) { vid.pause?.(); }
+  lbImg.src = "";
+  lbCurrent = null;
+}
+// 缩放以鼠标指针为中心：换算指针在图片坐标系里的位置，缩放后平移补偿
+$("lb-stage").addEventListener("wheel", (e) => {
+  e.preventDefault();
+  if (!lbCurrent || lbCurrent.mime.startsWith("video/")) return;
+  const rect = lbImg.getBoundingClientRect();
+  const cx = e.clientX - (rect.left + rect.width / 2);
+  const cy = e.clientY - (rect.top + rect.height / 2);
+  const old = lbState.zoom;
+  const zoom = Math.min(8, Math.max(0.2, e.deltaY < 0 ? old * 1.2 : old / 1.2));
+  const ratio = zoom / old;
+  lbState.ox = cx - (cx - lbState.ox) * ratio;
+  lbState.oy = cy - (cy - lbState.oy) * ratio;
+  lbState.zoom = zoom;
+  if (lbState.zoom === 1) { lbState.ox = 0; lbState.oy = 0; }
+  lbTransform();
+}, { passive: false });
+// 拖拽平移（旋转后的位移在屏幕坐标系近似处理）
+let lbDrag = null;
+$("lb-stage").addEventListener("mousedown", (e) => {
+  if (e.target !== lbImg && e.target.id !== "lb-stage") return;
+  lbDrag = { x: e.clientX, y: e.clientY, ox: lbState.ox, oy: lbState.oy };
+  lbImg.style.cursor = "grabbing";
+});
+window.addEventListener("mousemove", (e) => {
+  if (!lbDrag) return;
+  lbState.ox = lbDrag.ox + (e.clientX - lbDrag.x);
+  lbState.oy = lbDrag.oy + (e.clientY - lbDrag.y);
+  lbTransform();
+});
+window.addEventListener("mouseup", () => { lbDrag = null; lbImg.style.cursor = "grab"; });
 $("lb-close").onclick = closeViewer;
 $("lb-fav").onclick = async () => {
   if (!lbCurrent) return;
@@ -574,18 +647,43 @@ $("lb-trash").onclick = () => {
 $("lb-share").onclick = () => { if (lbCurrent) shareDialog([lbCurrent.blob_hash]); };
 $("lb-detail").onclick = () => { if (lbCurrent) showBlobDetail(lbCurrent); };
 // 重命名入口放详情弹窗里（灯箱工具条空间有限）
-$("lb-zoom-in").onclick = () => { lbState.zoom = Math.min(6, lbState.zoom * 1.25); lbTransform(); };
-$("lb-zoom-out").onclick = () => { lbState.zoom = Math.max(0.3, lbState.zoom / 1.25); lbTransform(); };
-$("lb-rotate").onclick = () => { lbState.rotate = (lbState.rotate + 90) % 360; lbTransform(); };
-$("lb-flip-h").onclick = () => { lbState.flipH *= -1; lbTransform(); };
-$("lb-flip-v").onclick = () => { lbState.flipV *= -1; lbTransform(); };
-$("lb-reset").onclick = () => { lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1 }; lbTransform(); };
-$("lb-stage").addEventListener("wheel", (e) => {
-  e.preventDefault();
-  lbState.zoom = Math.min(6, Math.max(0.3, e.deltaY < 0 ? lbState.zoom * 1.15 : lbState.zoom / 1.15));
-  lbTransform();
-}, { passive: false });
+$("lb-zoom-in").onclick = () => { lbState.zoom = Math.min(8, lbState.zoom * 1.25); lbTransform(); };
+$("lb-zoom-out").onclick = () => { lbState.zoom = Math.max(0.2, lbState.zoom / 1.25); lbTransform(); };
+// 旋转/翻转以屏幕中心为原点：清空平移后仅变换
+$("lb-rotate").onclick = () => { lbState.rotate = (lbState.rotate + 90) % 360; lbState.ox = 0; lbState.oy = 0; lbTransform(); };
+$("lb-flip-h").onclick = () => { lbState.flipH *= -1; lbState.ox = 0; lbState.oy = 0; lbTransform(); };
+$("lb-flip-v").onclick = () => { lbState.flipV *= -1; lbState.ox = 0; lbState.oy = 0; lbTransform(); };
+$("lb-reset").onclick = () => { lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1, ox: 0, oy: 0 }; lbTransform(); };
 viewer.onclick = (e) => { if (e.target === $("lb-stage")) closeViewer(); };
+
+// 批量重命名（模式中 {n} 为序号，自动保留扩展名）
+function batchRenameDialog() {
+  const hashes = [...selected];
+  if (hashes.length === 0) { toast("先勾选照片", true); return; }
+  uiForm("批量重命名", [
+    { id: "rn-pattern", label: "命名模式（{n} = 序号）", value: "照片-{n}" },
+  ], async (v) => {
+    const pattern = v["rn-pattern"].trim();
+    if (!pattern.includes("{n}")) { toast("模式中需包含 {n}", true); return; }
+    let ok = 0;
+    for (let i = 0; i < hashes.length; i++) {
+      const b = blobs.find((x) => x.blob_hash === hashes[i]);
+      if (!b) continue;
+      const dot = b.file_name.lastIndexOf(".");
+      const ext = dot >= 0 ? b.file_name.slice(dot) : "";
+      const newName = pattern.replace("{n}", String(i + 1).padStart(3, "0")) + ext;
+      try {
+        await api(`/api/blobs/${b.blob_hash}/rename`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ new_name: newName }) });
+        ok++;
+      } catch {}
+    }
+    toast(`已重命名 ${ok}/${hashes.length}`);
+    clearSelection();
+    route();
+  });
+}
+window.showBlobDetail = showBlobDetail;
+window.openViewer = openViewer;
 
 // ---------------- 探索（类别 + 地点） ----------------
 async function viewExplore() {
@@ -822,16 +920,23 @@ window.setAcl = async (albumId, kind, id, perm) => {
   } catch (e) { toast(e.message, true); }
 };
 
-// ---------------- 分享列表（多选删除/复制 + 清单） ----------------
+// ---------------- 分享列表（分页 + 页内全选 + 勾选后显示操作 + 清单可预览） ----------------
+let sharePage = 0;
+const SHARE_PAGE_SIZE = 10;
 async function viewShares() {
   const shares = await api("/api/shares");
+  const pages = Math.max(1, Math.ceil(shares.length / SHARE_PAGE_SIZE));
+  if (sharePage >= pages) sharePage = pages - 1;
+  const slice = shares.slice(sharePage * SHARE_PAGE_SIZE, (sharePage + 1) * SHARE_PAGE_SIZE);
   $("view").innerHTML = `
     <div class="row"><h2 style="margin:6px 0">分享</h2><span style="flex:1"></span>
-      <button id="sh-copy">复制选中链接</button>
-      <button class="danger" id="sh-del">删除选中</button></div>
+      <button id="sh-copy" style="display:none">复制选中链接</button>
+      <button class="danger" id="sh-del" style="display:none">取消分享选中</button></div>
     ${shares.length === 0 ? `<p class="hint">还没有分享。在照片（勾选圆圈多选）或相册页创建。</p>` : `
-    <table class="admin"><tr><th></th><th>名称</th><th>类型</th><th>数量</th><th>分享码</th><th>过期</th><th>清单</th><th></th></tr>
-      ${shares.map((s) => `
+    <table class="admin"><tr>
+        <th><input type="checkbox" id="sh-all" title="全选/取消全选本页"></th>
+        <th>名称</th><th>类型</th><th>数量</th><th>分享码</th><th>过期</th><th>内容</th><th></th></tr>
+      ${slice.map((s) => `
         <tr><td><input type="checkbox" class="sh-check" data-sid="${s.id}"></td>
         <td>${s.album_name || s.id}</td>
         <td>${s.kind === "album" ? "相册" : "照片"}</td>
@@ -839,21 +944,43 @@ async function viewShares() {
         <td>${s.access_code_hash ? "有" : "—"}</td>
         <td>${s.expires_at ? new Date(s.expires_at * 1000).toLocaleString() : "永久"}</td>
         <td><button onclick="showShareList('${s.id}')">查看内容</button></td>
-        <td class="row"><button onclick="copyShare('${s.id}')">复制</button></td></tr>`).join("")}
-    </table>`}`;
+        <td class="row"><button onclick="copyShare('${s.id}')">复制链接</button></td></tr>`).join("")}
+    </table>
+    ${pages > 1 ? `<div class="row" style="justify-content:center;margin-top:12px">
+      <button ${sharePage === 0 ? "disabled" : ""} id="sh-prev">‹ 上一页</button>
+      <span class="hint" style="align-self:center">${sharePage + 1} / ${pages}</span>
+      <button ${sharePage === pages - 1 ? "disabled" : ""} id="sh-next">下一页 ›</button>
+    </div>` : ""}`}`;
+  const updateBar = () => {
+    const n = document.querySelectorAll(".sh-check:checked").length;
+    $("sh-copy").style.display = n > 0 ? "inline-block" : "none";
+    $("sh-del").style.display = n > 0 ? "inline-block" : "none";
+  };
+  document.querySelectorAll(".sh-check").forEach((c) => { c.onchange = updateBar; });
+  const all = $("sh-all");
+  if (all) {
+    all.onchange = (e) => {
+      document.querySelectorAll(".sh-check").forEach((c) => {
+        c.checked = e.target.checked;
+      });
+      updateBar();
+    };
+  }
   $("sh-del").onclick = () => {
     const ids = [...document.querySelectorAll(".sh-check:checked")].map((c) => c.dataset.sid);
-    if (ids.length === 0) { toast("先勾选分享", true); return; }
-    uiConfirm("删除分享", `删除选中的 ${ids.length} 个分享？链接立即失效。`, async () => {
+    uiConfirm("取消分享", `取消选中的 ${ids.length} 个分享？链接立即失效。`, async () => {
       for (const id of ids) await api(`/api/shares/${id}`, { method: "DELETE" }).catch(() => {});
       route();
     }, true);
   };
   $("sh-copy").onclick = () => {
     const ids = [...document.querySelectorAll(".sh-check:checked")].map((c) => c.dataset.sid);
-    if (ids.length === 0) { toast("先勾选分享", true); return; }
     copyText(ids.map((id) => location.origin + `/s/${id}`).join("\n"));
   };
+  const prev = $("sh-prev");
+  if (prev) prev.onclick = () => { sharePage--; route(); };
+  const next = $("sh-next");
+  if (next) next.onclick = () => { sharePage++; route(); };
 }
 window.copyShare = async (id) => {
   await navigator.clipboard.writeText(location.origin + `/s/${id}`).catch(() => {});
@@ -863,9 +990,20 @@ window.showShareList = async (id) => {
   try {
     const meta = await fetch(`/s/${id}/meta`).then((r) => r.json());
     modal(`<h3>分享内容：${meta.album}</h3>
-      <table class="admin">${(meta.files || []).map((f) => `<tr><td>${f.name}</td><td>${new Date((f.taken_at || 0) * 1000).toLocaleDateString()}</td><td>${f.sanitized ? '<span class="badge">已去元数据</span>' : '<span class="badge">含元数据</span>'}</td></tr>`).join("")}</table>
+      <table class="admin">${(meta.files || []).map((f) => `
+        <tr><td>${f.name}</td>
+        <td>${new Date((f.taken_at || 0) * 1000).toLocaleDateString()}</td>
+        <td style="white-space:nowrap"><span class="badge">${f.sanitized ? "已去元数据" : "含元数据"}</span></td>
+        <td>${f.mime.startsWith("image/") || f.mime.startsWith("video/") ? `<button onclick='previewShared(${JSON.stringify(JSON.stringify(f))})'>预览</button>` : ""}</td></tr>`).join("")}</table>
       <div class="row" style="justify-content:flex-end"><button onclick="closeModal()">关闭</button></div>`);
   } catch (e) { toast(e.message || "加载失败", true); }
+};
+// 分享清单预览（所有者侧走 /api/blobs/{hash}/raw）
+window.previewShared = (fJson) => {
+  const f = typeof fJson === "string" ? JSON.parse(fJson) : fJson;
+  const b = blobs.find((x) => x.blob_hash === f.hash);
+  if (b) { openViewer(b); return; }
+  openViewer({ blob_hash: f.hash, mime: f.mime, file_name: f.name, favorite: false, total_len: 0, taken_at: f.taken_at || 0, gps_lat: null, gps_lon: null });
 };
 
 // ---------------- 回收站（可预览） ----------------

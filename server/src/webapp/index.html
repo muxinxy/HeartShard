@@ -104,7 +104,7 @@ table.admin th { color: var(--muted); font-weight: 500; }
 #toast { position: fixed; top: 16px; right: 16px; z-index: 300; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--primary); padding: 12px 16px; border-radius: 10px; display: none; max-width: 380px; font-size: 14px; white-space: pre-wrap; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint { color: var(--muted); font-size: 13px; }
-.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--input); color: var(--muted); }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--input); color: var(--muted); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -120,7 +120,7 @@ table.admin th { color: var(--muted); font-weight: 500; }
 <div id="app" class="layout">
   <nav class="sidebar">
     <div class="logo">牧心相册</div>
-    <a data-view="photos" class="active">🖼 照片</a>
+    <a data-view="photos" class="active">📅 时间线</a>
     <a data-view="explore">🔍 探索</a>
     <a data-view="albums">📁 相册</a>
     <a data-view="shares">🔗 分享</a>
