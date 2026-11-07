@@ -4,8 +4,10 @@ pub mod acl;
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod share;
 
 use heart_core::library::HeartCore;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub struct AppState {
@@ -13,4 +15,14 @@ pub struct AppState {
     pub users: auth::UserStore,
     pub acl: Mutex<acl::AclStore>,
     pub cfg: config::ServerConfig,
+    /// server.toml 所在目录（users.json / shares.json / share_cache 根）
+    pub server_root: PathBuf,
+    pub shares: Mutex<share::ShareStore>,
+}
+
+impl AppState {
+    /// 分享密文缓存目录（按相册 id 前 8 位分目录）。
+    pub fn share_cache_dir(&self, album_prefix: &str) -> PathBuf {
+        self.server_root.join("share_cache").join(album_prefix)
+    }
 }

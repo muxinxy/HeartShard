@@ -264,7 +264,31 @@ API（Bearer token，登录获得）：
 | `POST /api/albums/{id}/acl`（用户/组 × 权限，null=回退继承） | manage |
 | `POST /api/sync/run` | admin |
 
-已知限制：`/raw` 视频整段载入内存（Range 流式属 M4）；回收站操作 v1 仅 admin。
+已知限制：`/raw` 视频整段载入内存（Range 流式属后续优化）；回收站操作 v1 仅 admin。
+
+### 7.6.1 分享网关与 PWA（M4）
+
+**分享链接**（E2E 保持——服务器只见密文）：
+
+- `POST /api/albums/{id}/share`（manage）→ `{share_id, url}`；`DELETE /api/shares/{id}`；
+  `GET /api/shares`。`expires_days` 可选过期。
+- 创建时后台用 `HeartCore::assemble_encrypted` 把相册内每个图片 blob **RS 重组为
+  密文包**（各 chunk 的 `iv‖ct‖tag` 顺序拼接，不解密）缓存到
+  `share_cache/<album>/{hash}.enc`，同时生成 `meta.json`（文件清单+chunk 切分，
+  **无密钥**）与 `keys.json`（每 blob 的 blob_key）。
+- 观看端 `/s/{share_id}`：内嵌查看器页，浏览器取 meta → 取 keys → 逐 blob 取密文包
+  → **WebCrypto AES-256-GCM 解密**（每 chunk `iv‖ct‖tag`，AAD=
+  `blob_hash‖chunk_index‖total_chunks`，**tagLength: 96**——与生产 encrypt_chunk
+  完全一致）。服务器全程不产生明文。
+- 密钥静置于服务器 keys.json（服务器派生密钥是分享的必然）；链接本身不含密钥。
+
+**内置 PWA**（同一进程静态托管）：
+
+- `/` 即网页客户端：登录 → 相册下拉 → 照片网格（懒加载缩略图）→ 灯箱（原图）→
+  多选上传（走加密管线）→ 一键生成分享链接。
+- `manifest.webmanifest` + `sw.js`（仅缓存静态壳；API/数据一律直连）。
+- iOS：HTTPS（或 localhost）打开 → 添加到主屏幕（数据驱逐豁免）。局域网 IP 明文
+  HTTP 下浏览器不允许装 PWA——部署时用 Caddy/mkcert 提供内网 HTTPS。
 
 ## 8. 构建/发布（产物）
 

@@ -277,6 +277,18 @@ struct ManifestChunk {
     ciphertext_len: u32,
 }
 
+/// 分享网关的密文包（M4）：`ciphertext` = 各 chunk 密文（`iv‖ct‖tag`）顺序拼接，
+/// `chunk_lens` 为逐 chunk 密文长度（浏览器端切分用）；`blob_key_hex` 是该 blob 的
+/// 对称密钥（URL fragment 携带）。服务器不持有明文。
+#[derive(Debug, Serialize)]
+pub struct EncryptedPackage {
+    pub ciphertext: Vec<u8>,
+    pub blob_key_hex: String,
+    pub file_name: String,
+    pub mime: String,
+    pub chunk_lens: Vec<u32>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ManifestShard {
     chunk_index: u32,
@@ -1310,6 +1322,55 @@ impl HeartCore {
             skipped: report.skipped_objects,
             stores_ok: report.stores_ok,
             stores_failed: report.stores_failed,
+        })
+    }
+
+    /// 重组**加密密文**（不解密）：全部 chunk 的 `iv‖ct‖tag` 顺序拼接，
+    /// 并导出该 blob 的 blob_key。分享网关专用——服务器只见密文，
+    /// 密钥经 URL #fragment 交给浏览器，WebCrypto 在前端解密。
+    pub fn assemble_encrypted(&self, blob_hash: &str) -> Result<EncryptedPackage, LibError> {
+        use ida::DispersalConfig;
+        let keys = self.keys_or_err()?.clone();
+        let blob_hex = blob_hash.to_lowercase();
+        let manifest = self.load_manifest(&blob_hex)?;
+        let blob_hash_bytes: [u8; 32] = decode_hash(&manifest.blob_sha256)?;
+        let config = DispersalConfig::new(manifest.n, manifest.m)?;
+
+        let mut ciphertext = Vec::new();
+        let mut chunk_lens: Vec<u32> = Vec::new();
+        for (chunk_index, chunk) in manifest.chunks.iter().enumerate() {
+            let mut shards: Vec<(u8, Vec<u8>)> = Vec::new();
+            for s in manifest.shards.iter().filter(|s| s.chunk_index as usize == chunk_index) {
+                let data = self
+                    .store_by_id(&s.storage_id)
+                    .ok()
+                    .and_then(|store| store.get(&s.remote_key));
+                if let Some(d) = data {
+                    if d.len() as u32 == s.size && hex::encode(crypto::sha256(&d)) == s.sha256 {
+                        shards.push((s.shard_index, d));
+                    }
+                }
+            }
+            if shards.len() < manifest.m as usize {
+                return Err(LibError::Data(format!(
+                    "blob {blob_hex} chunk {chunk_index} 可用 shard 不足"
+                )));
+            }
+            let refs: Vec<(u8, &[u8])> =
+                shards.iter().map(|(i, d)| (*i, d.as_slice())).collect();
+            let ct = ida::decode_shards(&refs, config, chunk.ciphertext_len as usize)
+                .map_err(|e| LibError::Data(format!("chunk 重组失败: {e}")))?;
+            ciphertext.extend_from_slice(&ct);
+            chunk_lens.push(chunk.ciphertext_len);
+        }
+
+        let blob_key_hex = hex::encode(keys.blob_key(&blob_hash_bytes)?.as_ref());
+        Ok(EncryptedPackage {
+            ciphertext,
+            blob_key_hex,
+            file_name: manifest.file_name.clone(),
+            mime: manifest.mime.clone(),
+            chunk_lens,
         })
     }
 

@@ -702,6 +702,7 @@ dependencies = [
  "argon2",
  "axum",
  "base64 0.22.1",
+ "crypto",
  "getrandom 0.2.17",
  "heart-core",
  "heartshard-syncer",

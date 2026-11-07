@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>牧心相册 · 分享</title>
+<style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #14161a; color: #e8e6e3; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+header { position: sticky; top: 0; padding: 14px 20px; background: rgba(20,22,26,.95); border-bottom: 1px solid #23262d; font-weight: 700; font-size: 17px; }
+#grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; padding: 16px; }
+.cell { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: #1b1e24; cursor: pointer; }
+.cell img { width: 100%; height: 100%; object-fit: cover; }
+.cell .name { position: absolute; bottom: 0; left: 0; right: 0; padding: 14px 8px 5px; font-size: 12px; background: linear-gradient(transparent, rgba(0,0,0,.65)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#msg { padding: 40px; text-align: center; color: #8a8f98; }
+#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; }
+#viewer img { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%; }
+#viewer .close { position: absolute; top: 14px; right: 16px; z-index: 2; background: none; border: 1px solid #444; color: #ddd; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>牧心相册 · <span id="album-name"></span></header>
+<div id="msg">加载中…</div>
+<div id="grid" style="display:none"></div>
+<div id="viewer"><button class="close" onclick="document.getElementById('viewer').style.display='none'">✕ 关闭</button><img id="full" alt=""></div>
+<script>
+// 分享查看器：密文包 + WebCrypto 客户端解密（服务器全程只见密文）。
+const ID = location.pathname.split("/")[2];
+
+async function decryptBlob(keyHex, cipherBuf, chunkLens, blobHash) {
+  const raw = Uint8Array.from(keyHex.match(/../g).map(h => parseInt(h, 16)));
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+  // chunk AAD = blob_hash(32B) ‖ chunk_index(u32BE) ‖ total_chunks(u32BE)（与桌面端 encrypt_chunk 一致）
+  const total = chunkLens.length;
+  const hashBytes = Uint8Array.from(blobHash.match(/../g).map(h => parseInt(h, 16)));
+  const out = [];
+  let off = 0;
+  chunkLens.forEach((len, idx) => {
+    const chunk = new Uint8Array(cipherBuf, off, len);
+    off += len;
+    out.push(chunk); // 先收集，下面按序解密
+  });
+  const plainParts = [];
+  for (let idx = 0; idx < out.length; idx++) {
+    const chunk = out[idx];
+    const iv = chunk.slice(0, 12);
+    const ct = chunk.slice(12);
+    const aad = new Uint8Array(40);
+    aad.set(hashBytes, 0);
+    new DataView(aad.buffer).setUint32(32, idx, false);
+    new DataView(aad.buffer).setUint32(36, total, false);
+    plainParts.push(new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aad, tagLength: 96 }, key, ct)));
+  }
+  const plainLen = plainParts.reduce((s, o) => s + o.length, 0);
+  const plain = new Uint8Array(plainLen);
+  let p = 0;
+  for (const o of plainParts) { plain.set(o, p); p += o.length; }
+  return plain;
+}
+
+(async () => {
+  const meta = await fetch(`/s/${ID}/meta`).then(r => { if (!r.ok) throw new Error("分享不可用"); return r.json(); });
+  document.getElementById("album-name").textContent = meta.album;
+  const keys = await fetch(`/s/${ID}/keys`).then(r => r.json());
+
+  const grid = document.getElementById("grid");
+  const msg = document.getElementById("msg");
+  msg.style.display = "none";
+  grid.style.display = "grid";
+  for (const f of meta.files) {
+    const keyHex = keys.keys[f.hash];
+    if (!keyHex) continue;
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.innerHTML = `<div class="name">${f.name}</div>`;
+    grid.appendChild(cell);
+    // 异步解密（不阻塞其余缩略图）
+    (async () => {
+      const buf = await fetch(`/s/${ID}/pkg/${f.hash}`).then(r => r.arrayBuffer());
+      const plain = await decryptBlob(keyHex, buf, f.chunk_lens, f.hash);
+      const url = URL.createObjectURL(new Blob([plain], { type: f.mime }));
+      const img = new Image();
+      img.src = url;
+      img.loading = "lazy";
+      img.onclick = () => {
+        document.getElementById("full").src = url;
+        document.getElementById("viewer").style.display = "block";
+      };
+      cell.prepend(img);
+    })();
+  }
+})().catch(e => {
+  document.getElementById("msg").textContent = "加载失败：" + e.message;
+});
+</script>
+</body>
+</html>

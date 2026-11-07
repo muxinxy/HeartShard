@@ -52,11 +52,14 @@ fn build_app(
     };
     let users = UserStore::init(root, &cfg).unwrap();
     let acl = AclStore::load(root);
+    let shares = heartshard_server::share::ShareStore::load(root);
     let state = Arc::new(AppState {
         core: Mutex::new(core),
         users,
         acl: Mutex::new(acl),
         cfg,
+        server_root: root.to_path_buf(),
+        shares: Mutex::new(shares),
     });
     api::router().with_state(state)
 }
@@ -339,4 +342,125 @@ async fn sync_endpoint_imports_and_publishes() {
     // 时间线出现照片（backup 相册可见——admin）
     let res = get(&app, "/api/blobs", &alice).await;
     assert_eq!(json_body(res).await.as_array().unwrap().len(), 1);
+}
+
+/// 分享流（M4）：创建分享 → meta 无密钥 → pkg 为密文 → blob_key（AES-GCM + AAD）
+/// 可解出与上传一致的明文 —— 服务器只见密文的 E2E 语义验证。
+#[tokio::test]
+async fn share_e2e_ciphertext_roundtrip() {
+    let lib = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let app = build_app(lib.path(), root.path(), vec![]);
+    let alice = login(&app, "alice", "alicepw").await;
+
+    // 建相册 + 上传真实 PNG
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/albums")
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "name": "共享相册" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let album_id = json_body(res).await["id"].as_str().unwrap().to_string();
+
+    let mut png = Vec::new();
+    image::DynamicImage::new_rgb8(64, 48)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let boundary = "XBOUND";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"share.png\"\r\n\r\n").as_bytes());
+    body.extend_from_slice(&png);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/api/albums/{album_id}/upload"))
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let up = json_body(res).await;
+    assert_eq!(up["status"], "imported", "上传: {up}");
+    let hash = up["blob_hash"].as_str().unwrap().to_string();
+
+    // 创建分享
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/api/albums/{album_id}/share"))
+                .header("authorization", format!("Bearer {alice}"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "share 创建失败: {}", json_body(res).await);
+    let share_id = json_body(res).await["share_id"].as_str().unwrap().to_string();
+
+    // meta：文件清单存在，但绝不含密钥字段
+    let res = get(&app, &format!("/s/{share_id}/meta"), "").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let meta = json_body(res).await;
+    let file0 = &meta["files"][0];
+    assert_eq!(file0["hash"], Value::String(hash.clone()));
+    assert!(file0.get("blob_key").is_none() || file0["blob_key"].is_null(), "meta 不得下发密钥");
+    let chunk_lens: Vec<u32> = file0["chunk_lens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as u32)
+        .collect();
+
+    // 未登录用户可以拿到密文包（E2E：拿到密文拿不到明文）
+    let res = get(&app, &format!("/s/{share_id}/pkg/{hash}"), "").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let pkg = axum::body::to_bytes(res.into_body(), 64 * 1024 * 1024).await.unwrap();
+    assert_eq!(
+        pkg.len() as u64,
+        chunk_lens.iter().map(|l| *l as u64).sum::<u64>(),
+        "密文长度 = Σchunk_lens"
+    );
+
+    // keys 端点（查看器取密钥的通道）+ Rust 侧走生产 decrypt_chunk 解密往返验证
+    let res = get(&app, &format!("/s/{share_id}/keys"), "").await;
+    let keys = json_body(res).await;
+    let key_hex = keys["keys"][&hash].as_str().unwrap().to_string();
+    let key_bytes: [u8; 32] = (0..32)
+        .map(|i| u8::from_str_radix(&key_hex[i * 2..i * 2 + 2], 16).unwrap())
+        .collect::<Vec<u8>>()
+        .try_into()
+        .unwrap();
+    let hash_bytes: [u8; 32] = hex::decode(&hash).unwrap().try_into().unwrap();
+    let mut plain = Vec::new();
+    let mut off = 0usize;
+    for (idx, len) in chunk_lens.iter().enumerate() {
+        let chunk = &pkg[off..off + *len as usize];
+        off += *len as usize;
+        let pt = crypto::decrypt_chunk(
+            &key_bytes,
+            chunk,
+            &hash_bytes,
+            idx as u32,
+            chunk_lens.len() as u32,
+        )
+        .expect("解密应成功（密文包 + 密钥可还原，服务器全程未见明文）");
+        plain.extend_from_slice(&pt);
+    }
+    assert_eq!(plain, png, "解密明文与上传内容一致");
 }

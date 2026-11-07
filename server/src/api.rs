@@ -9,7 +9,7 @@ use crate::AppState;
 use axum::{
     extract::{Multipart, Path as AxumPath, State},
     http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 use heart_core::library::{AlbumInfo, BlobEntry, HeartCore, ImportStatus};
@@ -19,15 +19,15 @@ use std::sync::Arc;
 
 type S = State<Arc<AppState>>;
 
-fn err(status: StatusCode, msg: impl Into<String>) -> Response {
+pub fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(serde_json::json!({ "error": msg.into() }))).into_response()
 }
 
-fn s_err(e: String) -> Response {
+pub fn s_err(e: String) -> Response {
     err(StatusCode::INTERNAL_SERVER_ERROR, e)
 }
 
-fn auth(state: &AppState, headers: &HeaderMap) -> Result<User, Response> {
+pub fn auth(state: &AppState, headers: &HeaderMap) -> Result<User, Response> {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -47,6 +47,31 @@ fn parent_map(core: &HeartCore) -> Result<HashMap<String, Option<String>>, Respo
         .into_iter()
         .map(|a: AlbumInfo| (a.id, a.parent_id))
         .collect())
+}
+
+/// share.rs 等模块使用的公开包装。
+pub fn parent_map_pub(core: &HeartCore) -> Result<HashMap<String, Option<String>>, Response> {
+    parent_map(core)
+}
+
+/// token 查询参数桥接：`?token=xxx` → Authorization 头（img/video 标签无法带头）。
+pub async fn token_query_bridge(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let (mut parts, body) = req.into_parts();
+    if parts.headers.get(header::AUTHORIZATION).is_none() {
+        if let Some(q) = parts.uri.query() {
+            for pair in q.split('&') {
+                if let Some(t) = pair.strip_prefix("token=") {
+                    if let Ok(v) = format!("Bearer {t}").parse() {
+                        parts.headers.insert(header::AUTHORIZATION, v);
+                    }
+                }
+            }
+        }
+    }
+    next.run(axum::extract::Request::from_parts(parts, body)).await
 }
 
 fn effective(state: &AppState, user: &User, album_id: &str, parents: &HashMap<String, Option<String>>) -> Perm {
@@ -251,50 +276,61 @@ pub async fn upload(
         }
     }
 
-    // 读出第一个文件字段到临时文件
+    // 读出第一个文件字段到临时目录（保留原始文件名——mime 与展示名都靠它）。
+    // 独立子目录放原始文件名，import_file 才能记录正确的名字。
     let tmp_dir = std::env::temp_dir().join("heartshard-server-upload");
-    std::fs::create_dir_all(&tmp_dir).ok();
-    let tmp = tmp_dir.join(format!(
-        "up-{}-{}",
+    let upload_dir = tmp_dir.join(format!(
+        "{}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0),
         user.uid
     ));
+    std::fs::create_dir_all(&upload_dir).ok();
     let mut file_name = "upload.bin".to_string();
-    {
-        let mut wrote_any = false;
-        let mut out = match std::fs::File::create(&tmp) {
-            Ok(f) => f,
-            Err(e) => return s_err(e.to_string()),
-        };
+    let mut wrote_any = false;
+    let mut staged: Option<std::path::PathBuf> = None;
+    let mut staged_out: Option<std::fs::File> = None;
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if let Some(name) = field.file_name() {
+            file_name = name.to_string();
+        }
+        if staged.is_none() {
+            let safe_name: String = file_name
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+                .collect();
+            let tmp = upload_dir.join(&safe_name);
+            let out = match std::fs::File::create(&tmp) {
+                Ok(f) => f,
+                Err(e) => return s_err(e.to_string()),
+            };
+            staged = Some(tmp);
+            staged_out = Some(out);
+        }
         use std::io::Write;
-        while let Ok(Some(field)) = multipart.next_field().await {
-            if let Some(name) = field.file_name() {
-                file_name = name.to_string();
-            }
-            let mut field = field;
-            loop {
-                match field.chunk().await {
-                    Ok(Some(chunk)) => {
-                        if out.write_all(&chunk).is_err() {
-                            return err(StatusCode::BAD_REQUEST, "上传写入失败");
-                        }
-                        wrote_any = true;
+        let out = staged_out.as_mut().unwrap();
+        let mut field = field;
+        loop {
+            match field.chunk().await {
+                Ok(Some(chunk)) => {
+                    if out.write_all(&chunk).is_err() {
+                        return err(StatusCode::BAD_REQUEST, "上传写入失败");
                     }
-                    Ok(None) => break,
-                    Err(_) => return err(StatusCode::BAD_REQUEST, "上传读取失败"),
+                    wrote_any = true;
                 }
-            }
-            if wrote_any {
-                break; // 只取第一个文件字段
+                Ok(None) => break,
+                Err(_) => return err(StatusCode::BAD_REQUEST, "上传读取失败"),
             }
         }
-        if !wrote_any {
-            return err(StatusCode::BAD_REQUEST, "缺少文件字段");
-        }
+        break; // 只取第一个文件字段
     }
+    if !wrote_any {
+        return err(StatusCode::BAD_REQUEST, "缺少文件字段");
+    }
+    let tmp = staged.unwrap();
+    drop(staged_out);
 
     // 解密管线是阻塞操作 → spawn_blocking
     let state2 = state.clone();
@@ -315,7 +351,7 @@ pub async fn upload(
     })
     .await;
 
-    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_dir_all(&upload_dir);
     match result {
         Ok(Ok((status, hash))) => {
             Json(serde_json::json!({ "status": status, "blob_hash": hash })).into_response()
@@ -553,13 +589,24 @@ pub async fn get_acl(State(state): S, headers: HeaderMap, AxumPath(album_id): Ax
 
 pub fn router() -> axum::Router<Arc<AppState>> {
     use axum::routing::{get, post};
+    use axum::Router as R;
     axum::Router::new()
+        .route("/", get(|| async { Html(include_str!("webapp/index.html")) }))
+        .route("/app.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/app.js")) }))
+        .route("/sw.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/sw.js")) }))
+        .route(
+            "/manifest.webmanifest",
+            get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json".to_string())], include_str!("webapp/manifest.webmanifest")) }),
+        )
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
         .route("/api/albums", get(list_albums).post(create_album))
         .route("/api/albums/{id}/blobs", get(album_blobs))
         .route("/api/albums/{id}/upload", post(upload))
+        .route("/api/albums/{id}/share", post(crate::share::create_share))
+        .route("/api/shares", get(crate::share::list_shares))
+        .route("/api/shares/{id}", axum::routing::delete(crate::share::delete_share))
         .route("/api/blobs", get(list_blobs))
         .route("/api/blobs/{hash}/thumbnail", get(thumbnail))
         .route("/api/blobs/{hash}/raw", get(raw))
@@ -568,4 +615,9 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/blobs/{hash}/purge", post(purge_blob))
         .route("/api/sync/run", post(run_sync))
         .route("/api/albums/{id}/acl", get(get_acl).post(set_acl))
+        .route("/s/{id}", get(crate::share::share_page))
+        .route("/s/{id}/meta", get(crate::share::share_meta))
+        .route("/s/{id}/keys", get(crate::share::share_keys))
+        .route("/s/{id}/pkg/{hash}", get(crate::share::share_pkg))
+        .layer(axum::middleware::from_fn(token_query_bridge))
 }

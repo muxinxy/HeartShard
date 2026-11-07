@@ -27,6 +27,7 @@ getrandom = "0.2"
 tempfile = "3"
 http-body-util = "0.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+crypto = { path = "../core-rs/crates/crypto" }
 
 # 与 heart-core 相同的 openssl 本地补丁（本 crate 独立 workspace 需自带）
 [patch.crates-io]

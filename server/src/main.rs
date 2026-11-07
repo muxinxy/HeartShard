@@ -5,7 +5,7 @@
 //! ```
 
 use heart_core::library::HeartCore;
-use heartshard_server::{acl, api, auth::UserStore, config::ServerConfig, AppState};
+use heartshard_server::{acl, api, auth::UserStore, config::ServerConfig, share, AppState};
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -53,11 +53,14 @@ fn main() {
         }
     };
     let acl_store = acl::AclStore::load(&server_root);
+    let shares = share::ShareStore::load(&server_root);
     let state = Arc::new(AppState {
         core: Mutex::new(core),
         users,
         acl: Mutex::new(acl_store),
         cfg: cfg.clone(),
+        server_root,
+        shares: Mutex::new(shares),
     });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
