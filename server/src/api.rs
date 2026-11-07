@@ -121,6 +121,37 @@ pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
     }
 }
 
+#[derive(Deserialize)]
+pub struct ChangePwReq {
+    pub old: String,
+    pub new: String,
+}
+
+/// POST /api/me/password —— 用户本人改口令。
+pub async fn change_own_password(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<ChangePwReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    match state.users.lock().unwrap().change_own_password(&user.uid, &req.old, &req.new) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+/// GET /favicon.ico —— 站点图标（内嵌 SVG；浏览器默认请求此路径）。
+pub async fn favicon() -> Response {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml".to_string()), (header::CACHE_CONTROL, "public, max-age=604800".to_string())],
+        include_str!("webapp/favicon.svg"),
+    )
+        .into_response()
+}
+
 pub async fn logout(State(state): S, headers: HeaderMap) -> Response {
     if let Ok(user) = auth(&state, &headers) {
         // 简化：遍历找该用户 token（家庭规模可接受）
@@ -667,6 +698,9 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
+        .route("/api/me/password", post(change_own_password))
+        .route("/favicon.ico", get(favicon))
+        .route("/favicon.svg", get(favicon))
         .route("/api/albums", get(list_albums).post(create_album))
         .route("/api/albums/{id}/blobs", get(album_blobs))
         .route("/api/albums/{id}/upload", post(upload))

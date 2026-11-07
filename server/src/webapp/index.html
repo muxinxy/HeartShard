@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <title>牧心相册</title>
 <style>
 :root {
@@ -113,8 +114,10 @@ table.admin th { color: var(--muted); font-weight: 500; }
   <nav class="sidebar">
     <div class="logo">牧心相册</div>
     <a data-view="photos" class="active">🖼 照片</a>
+    <a data-view="explore">🔍 探索</a>
     <a data-view="albums">📁 相册</a>
     <a data-view="shares">🔗 分享</a>
+    <a data-view="favorites">⭐ 收藏夹</a>
     <a data-view="trash">🗑 回收站</a>
     <div class="sec" id="admin-sec" style="display:none">管理</div>
     <a data-view="admin-users" id="nav-admin-users" style="display:none">👥 用户管理</a>
@@ -130,7 +133,14 @@ table.admin th { color: var(--muted); font-weight: 500; }
       <span style="flex:1"></span>
       <button id="select-btn" style="display:none">☑ 选择</button>
       <button class="primary" id="upload-btn" style="display:none">上传</button>
-      <div class="avatar" id="avatar">我</div>
+      <div style="position:relative">
+        <div class="avatar" id="avatar">我</div>
+        <div id="avatar-menu" style="display:none;position:absolute;right:0;top:44px;min-width:180px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.35);padding:6px;z-index:150">
+          <button id="menu-password" style="display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px">🔒 修改密码</button>
+          <button id="menu-theme" style="display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px">🌓 切换深浅色</button>
+          <button id="menu-logout" style="display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px;color:var(--danger)">↩ 退出登录</button>
+        </div>
+      </div>
     </div>
     <div class="content" id="view"></div>
     <div class="years" id="years"></div>

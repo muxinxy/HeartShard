@@ -225,6 +225,29 @@ impl UserStore {
         })
     }
 
+    /// 用户本人修改口令（校验旧口令；管理页改他人口令走 update_user）。
+    pub fn change_own_password(&mut self, uid: &str, old: &str, new: &str) -> Result<(), String> {
+        let user = self
+            .users
+            .iter()
+            .find(|u| u.uid == uid)
+            .ok_or("用户不存在")?;
+        if !verify_password(old, &user.password_hash) {
+            return Err("旧口令错误".into());
+        }
+        if new.is_empty() {
+            return Err("新口令不能为空".into());
+        }
+        let hash = hash_password(new)?;
+        let user = self
+            .users
+            .iter_mut()
+            .find(|u| u.uid == uid)
+            .ok_or("用户不存在")?;
+        user.password_hash = hash;
+        self.save_users()
+    }
+
     /// 登录：校验口令，签发会话 token。
     pub fn login(&self, name: &str, password: &str) -> Result<(String, User), String> {
         let uid = uid_for(name);

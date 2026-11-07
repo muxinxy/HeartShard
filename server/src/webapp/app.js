@@ -78,10 +78,43 @@ $("login-btn").onclick = async () => {
 };
 $("pass").addEventListener("keydown", (e) => e.key === "Enter" && $("login-btn").click());
 $("logout-btn") && null;
-$("avatar").onclick = async () => {
-  if (!confirm("退出登录？")) return;
+// 头像下拉菜单（MT Photos 式：改密码/深浅色/退出）
+$("avatar").onclick = () => {
+  const menu = $("avatar-menu");
+  menu.style.display = menu.style.display === "none" ? "block" : "none";
+};
+document.addEventListener("click", (e) => {
+  if (!$("avatar-menu").contains(e.target) && e.target.id !== "avatar") {
+    $("avatar-menu").style.display = "none";
+  }
+});
+$("menu-logout").onclick = () => {
   fetch("/api/logout", { method: "POST", headers: { authorization: `Bearer ${token}` } }).catch(() => {});
   showLogin();
+};
+$("menu-theme").onclick = () => {
+  document.body.classList.toggle("theme-light");
+  localStorage.setItem("hs_theme", document.body.classList.contains("theme-light") ? "light" : "dark");
+};
+$("menu-password").onclick = () => {
+  modal(`
+    <h3>修改密码</h3>
+    <input id="pw-old" type="password" placeholder="旧口令" style="width:100%;margin:6px 0">
+    <input id="pw-new" type="password" placeholder="新口令" style="width:100%;margin:6px 0">
+    <input id="pw-new2" type="password" placeholder="确认新口令" style="width:100%;margin:6px 0">
+    <button class="primary" id="pw-go" style="margin-top:10px">确定</button>`);
+  $("pw-go").onclick = async () => {
+    if ($("pw-new").value !== $("pw-new2").value) { toast("两次新口令不一致", true); return; }
+    try {
+      await api("/api/me/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ old: $("pw-old").value, new: $("pw-new").value }),
+      });
+      closeModal();
+      toast("密码已修改");
+    } catch (e) { toast(e.message, true); }
+  };
 };
 $("theme-toggle").onclick = () => {
   document.body.classList.toggle("theme-light");
@@ -94,7 +127,7 @@ if (token) {
 } else showLogin();
 
 // ---------------- 路由 ----------------
-const VIEWS = ["photos", "albums", "shares", "trash", "admin-users", "admin-groups", "admin-sources", "admin-status"];
+const VIEWS = ["photos", "explore", "favorites", "albums", "shares", "trash", "admin-users", "admin-groups", "admin-sources", "admin-status"];
 document.querySelectorAll(".sidebar a[data-view]").forEach((a) => {
   a.onclick = () => { location.hash = `#/${a.dataset.view}`; };
 });
@@ -114,6 +147,8 @@ function route() {
   currentAlbum = view.startsWith("album-") ? view.replace("album-", "") : "";
   const map = {
     photos: viewPhotos,
+    explore: viewExplore,
+    favorites: viewFavorites,
     albums: viewAlbums,
     shares: viewShares,
     trash: viewTrash,
@@ -251,6 +286,78 @@ window.delBlob = async (hash, name) => {
   toast("已移入回收站");
   route();
 };
+
+// ---------------- 探索（地点聚类 + 类型分类） ----------------
+async function viewExplore() {
+  const all = await api("/api/blobs");
+  const photos = all.filter((b) => b.mime.startsWith("image/"));
+  const videos = all.filter((b) => b.mime.startsWith("video/"));
+  // GPS 聚类：坐标保留 1 位小数（约 11km 网格），同格归为一组地点
+  const places = new Map();
+  for (const b of all) {
+    if (b.gps_lat == null || b.gps_lon == null) continue;
+    const key = `${b.gps_lat.toFixed(1)},${b.gps_lon.toFixed(1)}`;
+    (places.get(key) || places.set(key, []).get(key)).push(b);
+  }
+  const placeList = [...places.entries()].filter(([, v]) => v.length > 0).sort((a, b) => b[1].length - a[1].length);
+  $("view").innerHTML = `
+    <h2 style="margin:6px 0">探索</h2>
+    <h3 class="day-header">按类型</h3>
+    <div class="album-wall">
+      <div class="album-card" data-kind="photo"><div class="cov" style="display:grid;place-items:center;font-size:36px">🖼</div><div class="nm">照片<span class="cnt">${photos.length}</span></div></div>
+      <div class="album-card" data-kind="video"><div class="cov" style="display:grid;place-items:center;font-size:36px">🎬</div><div class="nm">视频<span class="cnt">${videos.length}</span></div></div>
+    </div>
+    <h3 class="day-header" style="margin-top:22px">按地点（GPS 聚类）</h3>
+    ${placeList.length === 0
+      ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
+      : `<div class="album-wall">
+          ${placeList.map(([k, v]) => `
+            <div class="album-card" data-place="${k}">
+              <div class="cov" style="display:grid;place-items:center;font-size:30px">📍</div>
+              <div class="nm"><span>${k}</span><span class="cnt">${v.length}</span></div>
+            </div>`).join("")}
+        </div>`}`;
+  v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("照片", (b) => b.mime.startsWith("image/"));
+  v.querySelector('[data-kind="video"]').onclick = () => openFiltered("视频", (b) => b.mime.startsWith("video/"));
+  v.querySelectorAll("[data-place]").forEach((card) => {
+    card.onclick = () => {
+      const k = card.dataset.place;
+      const items = places.get(k);
+      openFiltered(`📍 ${k}`, (b) => items.some((i) => i.blob_hash === b.blob_hash), items);
+    };
+  });
+}
+
+// 类型/地点命中后的网格视图（复用照片网格；带返回探索入口）
+function openFiltered(title, pred, presetItems) {
+  const list = (presetItems || blobs).filter(pred);
+  const v = $("view");
+  v.innerHTML = `
+    <div class="row"><h2 style="margin:6px 0">${title}</h2><span class="badge">${list.length} 张</span>
+      <span style="flex:1"></span><button id="back-explore">返回探索</button></div>
+    <div id="filtered-grid" class="grid"></div>`;
+  const grid = $("filtered-grid");
+  for (const b of list) grid.appendChild(photoCell(b));
+  if (list.length === 0) grid.innerHTML = `<p class="hint">没有照片。</p>`;
+  $("back-explore").onclick = () => { location.hash = "#/explore"; };
+  $("years").innerHTML = "";
+}
+
+// ---------------- 收藏夹 ----------------
+async function viewFavorites() {
+  blobs = await api("/api/blobs");
+  const favs = blobs.filter((b) => b.favorite);
+  const v = $("view");
+  v.innerHTML = `
+    <div class="row"><h2 style="margin:6px 0">⭐ 收藏夹</h2><span class="badge">${favs.length} 张</span></div>
+    <div class="grid" id="fav-grid"></div>`;
+  const grid = $("fav-grid");
+  if (favs.length === 0) {
+    v.innerHTML = `<p class="hint">还没有收藏。在照片上右键 → 收藏。</p>`;
+    return;
+  }
+  for (const b of favs) grid.appendChild(photoCell(b));
+}
 
 // ---------------- 多选 + 分享 ----------------
 function exitSelect() { selectMode = false; selected = new Set(); const sb = document.querySelector(".selbar"); if (sb) sb.remove(); }
