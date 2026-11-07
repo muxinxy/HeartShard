@@ -114,7 +114,6 @@ fn sanitize_and_encrypt(
     core: &heart_core::library::HeartCore,
     hash: &str,
     ) -> Result<Option<(Vec<u8>, String, Vec<u32>, String)>, String> {
-    use image::ImageEncoder as _;
     let (plain, manifest) = match core.decrypt_blob_bytes(hash) {
         Ok(v) => v,
         Err(e) => return Err(e.to_string()),
