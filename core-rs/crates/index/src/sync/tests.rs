@@ -22,6 +22,7 @@ fn blob(hash: String, name_suffix: &str) -> BlobRecord {
         manifest_storage_key: format!("manifests/x/{name_suffix}.bin"),
         created_at: 1,
         deleted_at: None,
+        favorite: false,
     }
 }
 

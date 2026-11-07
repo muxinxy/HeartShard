@@ -115,6 +115,67 @@ fn single_device_shard_manifest_redundancy_and_restore() {
     assert!(matches!(core.list_blobs(), Err(LibError::Locked)));
 }
 
+/// 相册应用核心交互：重命名 / 收藏 / 相册内容 / 缩略图按需生成 / 回收站 / 清除碎片。
+#[test]
+fn photo_lifecycle_rename_favorite_trash_album() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = HeartCore::new(dir.path());
+    core.unlock("correct horse battery staple").unwrap();
+
+    // 真实 PNG（缩略图生成需要可解码的图片）
+    let src_dir = tempfile::tempdir().unwrap();
+    let src_path = src_dir.path().join("pic.png");
+    let mut png = Vec::new();
+    image::DynamicImage::new_rgb8(320, 240)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    std::fs::write(&src_path, &png).unwrap();
+
+    let outcome = core.import_file(&src_path).unwrap();
+    assert_eq!(outcome.status, ImportStatus::Imported, "{outcome:?}");
+    let blob_hash = outcome.blob_hash.clone().unwrap();
+
+    // 重命名 + 收藏
+    core.rename_blob(&blob_hash, "海边假日.png").unwrap();
+    core.set_blob_favorite(&blob_hash, true).unwrap();
+    let blobs = core.list_blobs().unwrap();
+    assert_eq!(blobs.len(), 1);
+    assert_eq!(blobs[0].file_name, "海边假日.png");
+    assert!(blobs[0].favorite);
+
+    // 相册加入 + 内容查询
+    let album_id = core.album_create("旅行", None).unwrap();
+    core.album_add_blob(&album_id, &blob_hash).unwrap();
+    let album_blobs = core.list_album_blobs(&album_id).unwrap();
+    assert_eq!(album_blobs.len(), 1);
+    assert_eq!(album_blobs[0].blob_hash, blob_hash);
+
+    // 256px 缩略图（导入期缓存或按需生成）
+    assert!(core.thumbnail_cached(&blob_hash).unwrap().is_some());
+    // 1024px 大图：缓存未命中 → 解密按需生成 → 落加密缓存
+    let large = dir.path().join("thumbs").join(format!("{blob_hash}.1024.enc"));
+    assert!(!large.exists());
+    let url = core.thumbnail_large(&blob_hash).unwrap();
+    assert!(url.starts_with("data:image/png;base64,"));
+    assert!(large.exists(), "大图缓存应已生成");
+
+    // 回收站：删除 → 主列表消失、回收站出现 → 恢复
+    core.delete_blob(&blob_hash).unwrap();
+    assert!(core.list_blobs().unwrap().is_empty());
+    let trash = core.list_trashed().unwrap();
+    assert_eq!(trash.len(), 1);
+    assert_eq!(trash[0].blob_hash, blob_hash);
+    core.restore_blob(&blob_hash).unwrap();
+    assert_eq!(core.list_blobs().unwrap().len(), 1);
+
+    // 清除碎片：shard 与 manifest 全部删除，墓碑记录保留
+    core.delete_blob(&blob_hash).unwrap();
+    core.purge_blob(&blob_hash).unwrap();
+    assert_eq!(count_files(&dir.path().join("storages")), 0, "碎片应已清空");
+    core.restore_blob(&blob_hash).unwrap();
+    assert!(core.export_blob(&blob_hash, &dir.path().join("x.png")).is_err());
+}
+
 #[test]
 fn two_devices_sync_converge_timelines() {
     let cloud1 = tempfile::tempdir().unwrap();

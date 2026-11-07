@@ -428,3 +428,93 @@ h1, h2, h3 { color: var(--foreground); }
 /* ---------- 大图预览 / 视频 ---------- */
 .detail-body img { max-width: 100%; border-radius: var(--radius); }
 .detail-body video { max-width: 100%; border-radius: var(--radius); }
+
+/* ---------- 「更多」下拉菜单 ---------- */
+.dropdown-wrap { position: relative; }
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  z-index: 600;
+  overflow: hidden;
+}
+.dropdown-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 10px 16px;
+  font-size: 14px;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.dropdown-menu button:hover { background: var(--secondary); }
+
+.primary-btn {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border: none !important;
+  font-weight: 600;
+}
+
+/* ---------- 通知关闭按钮 / 收藏高亮 ---------- */
+.notice { position: relative; }
+.notice .notice-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.fav-on { color: #f0b45c !important; border-color: #f0b45c !important; }
+
+/* ---------- 高级详情折叠（加密/分片） ---------- */
+.tech-details {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.tech-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  user-select: none;
+}
+
+/* ---------- 任务中心浮层（右下角） ---------- */
+.task-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 800;
+  width: 320px;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+  padding: 12px 14px;
+  font-size: 14px;
+}
+.task-panel-title { font-weight: 600; margin-bottom: 8px; color: var(--foreground); }
+.task-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+}
+.task-label { color: var(--foreground); }
+.task-state { color: var(--muted); text-align: right; }
+.task-item.done .task-state { color: var(--success); }
+.task-item.failed .task-state { color: var(--destructive); }

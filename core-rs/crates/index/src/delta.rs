@@ -85,6 +85,7 @@ mod tests {
                     manifest_storage_key: "manifests/x/manifest.bin".into(),
                     created_at: 1,
                     deleted_at: None,
+                    favorite: false,
                 },
             }],
             albums: vec![Versioned {

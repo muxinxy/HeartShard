@@ -11,10 +11,6 @@ import {
   formatDate,
   ImportOutcome,
   ImportRunReport,
-  shortHash,
-  StorageStatus,
-  SyncOutcome,
-  VerifyReport,
 } from "../lib/api";
 import { BlobDetailModal } from "./BlobDetailModal";
 import { ImportWizard } from "./ImportWizard";
@@ -22,21 +18,10 @@ import { AlbumTree } from "./AlbumTree";
 import { MapView } from "./MapView";
 import { SettingsPage } from "./SettingsPage";
 import { StoragePage } from "./StoragePage";
+import { TrashPage } from "./TrashPage";
 import { Thumb } from "./Thumb";
 import { TaskPanel, TaskProvider, useTasks } from "./TaskPanel";
 import { useToast } from "./Toast";
-
-interface VerifyState {
-  report: VerifyReport;
-  at: number;
-}
-
-interface HealthSummary {
-  total: number;
-  ok: number;
-  bad: number;
-  results: VerifyReport[];
-}
 
 export function Gallery({ onLock }: { onLock: () => void }) {
   const toast = useToast();
@@ -46,10 +31,6 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [syncing, setSyncing] = useState(false);
   const [healthChecking, setHealthChecking] = useState(false);
   const [results, setResults] = useState<ImportOutcome[] | null>(null);
-  const [syncResult, setSyncResult] = useState<SyncOutcome | null>(null);
-  const [storages, setStorages] = useState<StorageStatus[]>([]);
-  const [health, setHealth] = useState<HealthSummary | null>(null);
-  const [verify, setVerify] = useState<Record<string, VerifyState>>({});
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -64,11 +45,13 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const [selectedAlbum, setSelectedAlbum] = useState<string>("");
   const [albumBlobs, setAlbumBlobs] = useState<BlobEntry[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [favOnly, setFavOnly] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setBlobs(await api.listBlobs());
-      setStorages(await api.storageStatus());
       setAlbums(await api.listAlbums());
       setError(null);
     } catch (e) {
@@ -159,11 +142,10 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const doSync = async () => {
     setSyncing(true);
     setError(null);
-    setSyncResult(null);
     const taskId = tasks.push("sync", "多设备同步");
     try {
       const r = await api.syncNow();
-      setSyncResult(r);
+      toast.success(`同步完成：拉取 ${r.pulled_objects} · 应用 ${r.applied_objects}`);
       tasks.finish(taskId, "done", `时钟 ${r.published_lamport} · 应用 ${r.applied_objects}`);
       await refresh();
     } catch (e) {
@@ -200,56 +182,22 @@ export function Gallery({ onLock }: { onLock: () => void }) {
   const doHealthCheck = async () => {
     setHealthChecking(true);
     setError(null);
-    const taskId = tasks.push("health", "一键体检（全部 blob）");
+    const taskId = tasks.push("health", "一键体检（全部照片）");
     try {
       const results = await api.verifyAll();
       const ok = results.filter((r) => r.ok).length;
-      setHealth({ total: results.length, ok, bad: results.length - ok, results });
-      // 顺带刷新逐 blob 徽章
-      const map: Record<string, VerifyState> = {};
-      for (const r of results) map[r.blob_hash] = { report: r, at: Date.now() };
-      setVerify((prev) => ({ ...prev, ...map }));
+      const bad = results.length - ok;
+      if (bad > 0) {
+        toast.error(`体检：${bad} 张照片存在缺失/损坏分片，可在照片详情里修复`);
+      } else {
+        toast.success(`体检：全部 ${results.length} 张照片健康`);
+      }
       tasks.finish(taskId, "done", `${ok}/${results.length} 健康`);
     } catch (e) {
       tasks.finish(taskId, "failed", String(e));
       setError(`体检失败：${String(e)}`);
     } finally {
       setHealthChecking(false);
-    }
-  };
-
-  const doVerify = async (blob: BlobEntry) => {
-    setError(null);
-    try {
-      const report = await api.verifyBlob(blob.blob_hash);
-      setVerify((prev) => ({ ...prev, [blob.blob_hash]: { report, at: Date.now() } }));
-    } catch (e) {
-      setError(`校验失败：${String(e)}`);
-    }
-  };
-
-  const doRepair = async (blob: BlobEntry) => {
-    setError(null);
-    const taskId = tasks.push("repair", `修复 ${blob.file_name}`);
-    try {
-      const report = await api.repairBlob(blob.blob_hash);
-      tasks.finish(
-        taskId,
-        report.unrecoverable.length > 0 ? "failed" : "done",
-        report.unrecoverable.length > 0 ? "健康 shard 不足" : `修复 ${report.repaired.length} 个 shard`
-      );
-      if (report.repaired.length > 0) {
-        toast.success(`已修复 ${report.repaired.length} 个 shard`);
-      } else if (report.unrecoverable.length > 0) {
-        toast.error(`chunk ${report.unrecoverable.join(", ")} 损坏过重，无法自动修复`);
-      } else {
-        toast.info("一切正常，无需修复。");
-      }
-      const after = await api.verifyBlob(blob.blob_hash);
-      setVerify((prev) => ({ ...prev, [blob.blob_hash]: { report: after, at: Date.now() } }));
-    } catch (e) {
-      tasks.finish(taskId, "failed", String(e));
-      setError(`修复失败：${String(e)}`);
     }
   };
 
@@ -301,8 +249,11 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     }
   };
 
-  // 展示集：选中相册时为相册内容，否则为全部
-  const displayBlobs = selectedAlbum ? albumBlobs : blobs;
+  // 展示集：选中相册时为相册内容，否则为全部；可叠加「只看收藏」
+  const displayBlobs = useMemo(() => {
+    const base = selectedAlbum ? albumBlobs : blobs;
+    return favOnly ? base.filter((b) => b.favorite) : base;
+  }, [selectedAlbum, albumBlobs, blobs, favOnly]);
 
   // 按拍摄/修改时间倒序 + 日期分组（列表视图用）
   const items = useMemo(() => {
@@ -318,10 +269,6 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     }
     return out;
   }, [displayBlobs]);
-
-  const healthBadge = health
-    ? `${health.ok}/${health.total} 健康`
-    : null;
 
   if (wizardOpen) {
     return (
@@ -372,15 +319,22 @@ export function Gallery({ onLock }: { onLock: () => void }) {
     return <MapView blobs={blobs} onDone={() => setMapOpen(false)} />;
   }
 
+  if (trashOpen) {
+    return (
+      <TrashPage
+        onDone={() => {
+          setTrashOpen(false);
+          refresh();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="gallery">
       <header className="toolbar">
         <div className="toolbar-row">
-          <span className="brand">HeartShard · 牧心相册</span>
-          <span className="storages" title={storages.map((s) => `${s.id} (${s.kind})`).join(", ")}>
-            {healthBadge ?? (storages.length > 0 ? `${storages.length} 个 Storage` : "")}
-          </span>
-          <span className="spacer" />
+          <span className="brand">牧心相册</span>
           <select
             className="album-select"
             value={selectedAlbum}
@@ -393,33 +347,49 @@ export function Gallery({ onLock }: { onLock: () => void }) {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => setFavOnly(!favOnly)}
+            className={favOnly ? "fav-on" : "secondary"}
+            title="只看收藏"
+          >
+            {favOnly ? "♥ 收藏" : "♡ 收藏"}
+          </button>
           <button onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}>
-            {viewMode === "grid" ? "☰ 列表" : "▦ 网格"}
+            {viewMode === "grid" ? "▦ 网格" : "☰ 列表"}
           </button>
-        </div>
-        <div className="toolbar-row toolbar-buttons">
-          <button onClick={doImport} disabled={importing}>
-            {importing ? "导入中…" : "导入照片 / 视频"}
-          </button>
-          <button onClick={() => setWizardOpen(true)}>导入目录（向导）</button>
-          <button onClick={() => setAlbumTreeOpen(true)}>相册树</button>
-          <button onClick={() => setMapOpen(true)}>地图</button>
-          <button onClick={() => setStorageOpen(true)}>存储</button>
-          <button onClick={() => setSettingsOpen(true)}>设置</button>
-          <button onClick={doSync} disabled={syncing}>
-            {syncing ? "同步中…" : "同步"}
-          </button>
-          <button onClick={doRebalance} disabled={syncing}>
-            再平衡
-          </button>
-          <button onClick={doHealthCheck} disabled={healthChecking}>
-            {healthChecking ? "体检中…" : "一键体检"}
-          </button>
-          <button onClick={openHistory}>历史</button>
-          <button onClick={refresh}>刷新</button>
+          <span className="spacer" />
           <button onClick={doLock} className="secondary">
             锁定
           </button>
+        </div>
+        <div className="toolbar-row toolbar-buttons">
+          <button className="primary-btn" onClick={doImport} disabled={importing}>
+            {importing ? "导入中…" : "导入照片 / 视频"}
+          </button>
+          <button onClick={() => setWizardOpen(true)}>导入目录</button>
+          <button onClick={() => setAlbumTreeOpen(true)}>相册管理</button>
+          <button onClick={() => setMapOpen(true)}>地图</button>
+          <button onClick={() => setSettingsOpen(true)}>设置</button>
+          <div className="dropdown-wrap">
+            <button onClick={() => setMenuOpen(!menuOpen)}>更多 ▾</button>
+            {menuOpen && (
+              <div className="dropdown-menu" onMouseLeave={() => setMenuOpen(false)}>
+                <button onClick={() => { setMenuOpen(false); doSync(); }} disabled={syncing}>
+                  同步多设备
+                </button>
+                <button onClick={() => { setMenuOpen(false); doRebalance(); }} disabled={syncing}>
+                  再平衡分片
+                </button>
+                <button onClick={() => { setMenuOpen(false); doHealthCheck(); }} disabled={healthChecking}>
+                  {healthChecking ? "体检中…" : "一键体检"}
+                </button>
+                <button onClick={() => { setMenuOpen(false); setTrashOpen(true); }}>回收站</button>
+                <button onClick={() => { setMenuOpen(false); setStorageOpen(true); }}>存储管理</button>
+                <button onClick={() => { setMenuOpen(false); openHistory(); }}>导入历史</button>
+                <button onClick={() => { setMenuOpen(false); refresh(); }}>刷新</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -435,6 +405,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       {results && (
         <div className="notice">
           <strong>本次导入：</strong>
+          <button className="notice-close" onClick={() => setResults(null)}>✕</button>
           {results.map((r) => (
             <div key={r.path} className={`result ${r.status}`}>
               {r.status === "imported" && "✅ 已加密上传"}
@@ -446,22 +417,12 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           ))}
         </div>
       )}
-      {syncResult && (
-        <div className="notice">
-          <strong>同步完成：</strong>
-          时钟 {syncResult.published_lamport} · 拉取 {syncResult.pulled_objects} · 应用{" "}
-          {syncResult.applied_objects}
-          {syncResult.stores_failed.length > 0 && (
-            <span className="error"> 失败：{syncResult.stores_failed.join("; ")}</span>
-          )}
-        </div>
-      )}
-      {health && health.bad > 0 && (
+      {error && (
         <div className="notice error">
-          一键体检：{health.bad} 个 blob 存在缺失/损坏 shard——可逐个「修复」。
+          {error}
+          <button className="notice-close" onClick={() => setError(null)}>✕</button>
         </div>
       )}
-      {error && <div className="notice error">{error}</div>}
 
       {historyOpen && (
         <div className="notice">
@@ -537,7 +498,6 @@ export function Gallery({ onLock }: { onLock: () => void }) {
               );
             }
             const b = item.blob;
-            const v = verify[b.blob_hash];
             return (
               <div
                 className="blob-row"
@@ -547,30 +507,16 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                 <Thumb blobHash={b.blob_hash} mime={b.mime} />
                 <div className="blob-main">
                   <span className="name" title={b.file_name}>
+                    {b.favorite && <span style={{ color: "#f0b45c" }}>♥ </span>}
                     {b.file_name}
                   </span>
                   <span className="meta">
-                    {formatBytes(b.total_len)} · {b.mime} · {formatDate(b.taken_at)} ·{" "}
-                    <code title={b.blob_hash}>{shortHash(b.blob_hash)}</code>
+                    {formatBytes(b.total_len)} · {formatDate(b.taken_at)}
                   </span>
                 </div>
                 <div className="blob-actions" onClick={(e) => e.stopPropagation()}>
-                  {v && (
-                    <span
-                      className={`badge ${v.report.ok ? "ok" : v.report.degraded ? "warn" : "bad"}`}
-                      title={`shards: ${v.report.shard_count}, 可用: ${v.report.available}, 缺失: ${v.report.missing.length}, 损坏: ${v.report.corrupted.length}`}
-                    >
-                      {v.report.ok
-                        ? `✔ 健康`
-                        : v.report.degraded
-                          ? `⚠ 降级（${v.report.available}/${v.report.shard_count}）`
-                          : `✘ 不可恢复`}
-                    </span>
-                  )}
                   <button onClick={() => doPreview(b)}>预览</button>
-                  <button onClick={() => doVerify(b)}>体检</button>
-                  <button onClick={() => doRepair(b)}>修复</button>
-                  <button onClick={() => doExport(b)}>导出</button>
+                  <button onClick={() => doExport(b)}>下载</button>
                 </div>
               </div>
             );
@@ -583,6 +529,19 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           blob={detailBlob}
           onClose={() => setDetailBlob(null)}
           onExport={doExport}
+          onPreview={doPreview}
+          onChanged={(b) => {
+            setDetailBlob(b);
+            refresh();
+          }}
+          onDeleted={() => {
+            setDetailBlob(null);
+            refresh().then(() => {
+              if (selectedAlbum) {
+                api.listAlbumBlobs(selectedAlbum).then(setAlbumBlobs).catch(() => {});
+              }
+            });
+          }}
         />
       )}
     </div>

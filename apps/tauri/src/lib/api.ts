@@ -21,9 +21,9 @@ export interface BlobEntry {
   mime: string;
   total_len: number;
   taken_at: number; // unix 秒
-  imported_at: number;
   gps_lat: number | null;
   gps_lon: number | null;
+  favorite: boolean;
 }
 
 export interface VerifyReport {
@@ -212,6 +212,14 @@ export const api = {
     invoke<BlobEntry[]>("list_album_blobs", { albumId }),
   albumAddBlob: (albumId: string, blobHash: string) =>
     invoke<void>("album_add_blob", { albumId, blobHash }),
+  renameBlob: (blobHash: string, newName: string) =>
+    invoke<void>("rename_blob", { blobHash, newName }),
+  setBlobFavorite: (blobHash: string, favorite: boolean) =>
+    invoke<void>("set_blob_favorite", { blobHash, favorite }),
+  deleteBlob: (blobHash: string) => invoke<void>("delete_blob", { blobHash }),
+  restoreBlob: (blobHash: string) => invoke<void>("restore_blob", { blobHash }),
+  purgeBlob: (blobHash: string) => invoke<void>("purge_blob", { blobHash }),
+  listTrashed: () => invoke<BlobEntry[]>("list_trashed"),
   openPathSystem: (path: string) => invoke<void>("open_path_system", { path }),
   thumbnailLarge: (blobHash: string) => invoke<string>("thumbnail_large", { blobHash }),
   pickDirectory: async (): Promise<string | null> => {

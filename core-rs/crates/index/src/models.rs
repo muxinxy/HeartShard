@@ -15,6 +15,7 @@ pub struct Versioned<T> {
 /// blob 元数据。`hash` 是全局主键（64 hex 小写）。
 /// `file_name` 为时间线展示用（简报 §7.1 schema 的超集列，随 SQLCipher 加密落盘）。
 /// `gps_lat`/`gps_lon` 为 EXIF GPS（§10 地图视图；schema 超集列）。f64 无 Eq。
+/// `favorite` 为收藏标记（相册应用核心交互；schema 超集列）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlobRecord {
     pub hash: String,
@@ -34,6 +35,9 @@ pub struct BlobRecord {
     pub created_at: i64,
     /// 删除墓碑（unix 秒）；Some 即已删除。
     pub deleted_at: Option<i64>,
+    /// 收藏（♥）；旧设备同步来的 JSON 无此字段时默认 false。
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 /// 相册。`id` 为生成 uuid（字符串），跨设备稳定。

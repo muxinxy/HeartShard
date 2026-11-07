@@ -383,6 +383,36 @@ pub fn album_add_blob(
     state.core.lock().unwrap().album_add_blob(&album_id, &blob_hash).map_err(err_str)
 }
 
+#[tauri::command]
+pub fn rename_blob(blob_hash: String, new_name: String, state: State<'_, SessionState>) -> Result<(), String> {
+    state.core.lock().unwrap().rename_blob(&blob_hash, &new_name).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn set_blob_favorite(blob_hash: String, favorite: bool, state: State<'_, SessionState>) -> Result<(), String> {
+    state.core.lock().unwrap().set_blob_favorite(&blob_hash, favorite).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn delete_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<(), String> {
+    state.core.lock().unwrap().delete_blob(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn restore_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<(), String> {
+    state.core.lock().unwrap().restore_blob(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn purge_blob(blob_hash: String, state: State<'_, SessionState>) -> Result<(), String> {
+    state.core.lock().unwrap().purge_blob(&blob_hash).map_err(err_str)
+}
+
+#[tauri::command]
+pub fn list_trashed(state: State<'_, SessionState>) -> Result<Vec<crate::library::BlobEntry>, String> {
+    state.core.lock().unwrap().list_trashed().map_err(err_str)
+}
+
 /// 系统默认程序打开文件/目录（Rust 侧调用，不经 capability 校验）。
 #[tauri::command]
 pub fn open_path_system(path: String, app: tauri::AppHandle) -> Result<(), String> {

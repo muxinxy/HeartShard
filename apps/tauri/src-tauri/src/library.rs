@@ -85,6 +85,8 @@ pub struct BlobEntry {
     /// EXIF GPS（§10 地图视图；无 GPS 为 None）
     pub gps_lat: Option<f64>,
     pub gps_lon: Option<f64>,
+    /// 收藏（♥）
+    pub favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -671,6 +673,7 @@ impl HeartCore {
                 manifest_storage_key: manifest_key_path.clone(),
                 created_at: manifest.created_at,
                 deleted_at: None,
+                favorite: false,
             },
         })?;
         db.set_lamport(lamport)?;
@@ -691,6 +694,7 @@ impl HeartCore {
                 taken_at: v.record.taken_at,
                 gps_lat: v.record.gps_lat,
                 gps_lon: v.record.gps_lon,
+                favorite: v.record.favorite,
             })
             .collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
@@ -967,6 +971,7 @@ impl HeartCore {
                 taken_at: v.record.taken_at,
                 gps_lat: v.record.gps_lat,
                 gps_lon: v.record.gps_lon,
+                favorite: v.record.favorite,
             })
             .collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
@@ -991,6 +996,143 @@ impl HeartCore {
         })?;
         db.set_lamport(lamport)?;
         Ok(())
+    }
+
+    // ---------------- 照片操作（相册应用核心交互） ----------------
+
+    /// 重命名照片（展示名；LWW 随增量同步）。
+    pub fn rename_blob(&self, blob_hash: &str, new_name: &str) -> Result<(), LibError> {
+        if new_name.trim().is_empty() {
+            return Err(LibError::Data("名称不能为空".into()));
+        }
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let blob_hex = blob_hash.to_lowercase();
+        let existing = db
+            .load_blobs()?
+            .into_iter()
+            .find(|v| v.record.hash == blob_hex)
+            .ok_or_else(|| LibError::Data("blob not found".into()))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.file_name = new_name.trim().to_string();
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me,
+            record,
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// 收藏 / 取消收藏（♥）。
+    pub fn set_blob_favorite(&self, blob_hash: &str, favorite: bool) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let blob_hex = blob_hash.to_lowercase();
+        let existing = db
+            .load_blobs()?
+            .into_iter()
+            .find(|v| v.record.hash == blob_hex)
+            .ok_or_else(|| LibError::Data("blob not found".into()))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.favorite = favorite;
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me,
+            record,
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// 移入回收站（删除墓碑：shard 保留在 Storage，可恢复；随增量同步）。
+    pub fn delete_blob(&self, blob_hash: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let blob_hex = blob_hash.to_lowercase();
+        let existing = db
+            .load_blobs()?
+            .into_iter()
+            .find(|v| v.record.hash == blob_hex)
+            .ok_or_else(|| LibError::Data("blob not found".into()))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.deleted_at = Some(now_secs());
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me,
+            record,
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// 从回收站恢复。
+    pub fn restore_blob(&self, blob_hash: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let blob_hex = blob_hash.to_lowercase();
+        let existing = db
+            .load_blobs()?
+            .into_iter()
+            .find(|v| v.record.hash == blob_hex)
+            .ok_or_else(|| LibError::Data("blob not found".into()))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.deleted_at = None;
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me,
+            record,
+        })?;
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
+    /// 清除碎片（回收站里的彻底删除）：从全部 Storage 删除 shard 与 manifest，
+    /// 保留墓碑记录防止其他设备同步复活。
+    pub fn purge_blob(&self, blob_hash: &str) -> Result<(), LibError> {
+        let blob_hex = blob_hash.to_lowercase();
+        let remote_key = manifest_object_key(&blob_hex)?;
+        // manifest 可能已不可读（部分存储下线）——尽力删除
+        let manifest = self.load_manifest(&blob_hex).ok();
+        if let Some(manifest) = &manifest {
+            let mut keys: Vec<&str> = Vec::new();
+            keys.push(remote_key.as_str());
+            for s in &manifest.shards {
+                keys.push(&s.remote_key);
+            }
+            for store in self.all_stores()? {
+                for k in &keys {
+                    store.delete(k).ok();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 回收站列表（墓碑 blob，按删除时间倒序）。
+    pub fn list_trashed(&self) -> Result<Vec<BlobEntry>, LibError> {
+        let db = self.db_or_err()?;
+        let mut entries: Vec<BlobEntry> = db
+            .load_blobs()?
+            .into_iter()
+            .filter(|v| v.record.deleted_at.is_some())
+            .map(|v| BlobEntry {
+                blob_hash: v.record.hash,
+                file_name: v.record.file_name,
+                mime: v.record.mime,
+                total_len: v.record.size,
+                taken_at: v.record.taken_at,
+                gps_lat: v.record.gps_lat,
+                gps_lon: v.record.gps_lon,
+                favorite: v.record.favorite,
+            })
+            .collect();
+        entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
+        Ok(entries)
     }
 
     /// §10 大图预览：1024px 缩略图（加密缓存，独立于列表 256px）。
@@ -1365,11 +1507,20 @@ impl HeartCore {
         let keys = self.keys_or_err()?;
         const SIZE: u32 = 256;
         let cache = self.data_dir.join("thumbs").join(format!("{blob_hash}.{SIZE}.enc"));
-        if !cache.exists() {
-            return Ok(None);
-        }
-        let enc = fs::read(&cache)?;
-        let png = decrypt_bare(keys.manifest_key.as_ref(), &enc)?;
+        let png = if cache.exists() {
+            let enc = fs::read(&cache)?;
+            decrypt_bare(keys.manifest_key.as_ref(), &enc)?
+        } else {
+            // 按需生成：缓存未命中 → 完整解密 → 缩放 → 加密缓存。
+            // 老库/中断导入的照片没有导入期缩略图，这里兜底（仅图片）。
+            let (bytes, manifest) = self.decrypt_blob_bytes(blob_hash)?;
+            if !manifest.mime.starts_with("image/") {
+                return Ok(None);
+            }
+            let png = Self::generate_thumbnail_from_bytes(&bytes, SIZE)?;
+            self.thumbnail_cache_put(blob_hash, &png)?;
+            png
+        };
         use base64::Engine as _;
         Ok(Some(format!(
             "data:image/png;base64,{}",
@@ -2251,6 +2402,7 @@ impl HeartCore {
                 manifest_storage_key: manifest_object_key(blob_hex)?,
                 created_at: manifest.created_at,
                 deleted_at: None,
+                favorite: false,
             },
         })?;
         db.set_lamport(lamport)?;

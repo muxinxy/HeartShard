@@ -18,6 +18,7 @@ fn blob(hash: &str, taken_at: i64) -> BlobRecord {
         manifest_storage_key: format!("manifests/{hash}/manifest.bin"),
         created_at: 1,
         deleted_at: None,
+        favorite: false,
     }
 }
 
