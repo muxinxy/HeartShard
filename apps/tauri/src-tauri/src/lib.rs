@@ -1,13 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod commands;
-pub mod library;
-pub mod service_plugin;
-pub mod storage_ftp;
-pub mod storage_openlist;
-pub mod storage_s3;
-pub mod storage_video;
-pub mod storage_webdav;
+// M1 抽库：HeartCore 与四个存储适配器已迁移至 heart-core crate（平台无关），
+// 这里 re-export 保持 crate::library / crate::storage_* 路径不变（commands.rs、
+// e2e 测试与 storage_video.rs 无需改动）。
+pub use heart_core::{library, storage_ftp, storage_openlist, storage_s3, storage_webdav};
+mod service_plugin;
+mod storage_video;
 
 use tauri::Manager;
 

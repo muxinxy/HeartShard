@@ -1612,7 +1612,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "heartshard-tauri"
+name = "heart-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
@@ -1631,13 +1631,35 @@ dependencies = [
  "sha2",
  "shard",
  "suppaftp",
+ "thiserror 2.0.21",
+ "webpki-roots 0.26.11",
+ "zeroize",
+]
+
+[[package]]
+name = "heartshard-tauri"
+version = "0.1.0"
+dependencies = [
+ "crypto",
+ "getrandom 0.2.17",
+ "heart-core",
+ "hex",
+ "hmac",
+ "ida",
+ "image",
+ "index",
+ "keypath",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shard",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tempfile",
  "thiserror 2.0.21",
- "webpki-roots 0.26.11",
  "zeroize",
 ]
 

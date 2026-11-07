@@ -6,6 +6,7 @@ members = [
     "crates/ida",
     "crates/shard",
     "crates/index",
+    "crates/heart-core",
 ]
 
 [workspace.package]

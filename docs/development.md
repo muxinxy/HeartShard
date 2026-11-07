@@ -48,8 +48,12 @@ core-rs/                     # Rust 核心 workspace
 ├── crates/crypto/           # bare 层（MixFile 对齐）/ KDF / AAD chunk 层
 ├── crates/ida/              # Reed-Solomon 分散（Leopard-RS 封装）
 ├── crates/shard/            # blob→chunk→加密→分散→重组管线
+├── crates/index/            # SQLCipher 索引 + LWW 合并 + delta 同步
+├── crates/heart-core/       # 平台无关核心库：HeartCore（库会话/导入/相册/回收站/同步）
+│                            #   + S3/WebDAV/OpenList/FTPS 适配器（M1' 自 apps/tauri 抽出）
+│                            #   桌面壳/牧心后台/syncer CLI 共用；Tauri 特有层留在 apps/tauri
 └── bindings/                # wasm/（Tauri）与 ffi/（鸿蒙 napi）—— M1/M4 加入
-apps/tauri/                  # Windows + Android + iOS 共用 UI 壳（M1 起）
+apps/tauri/                  # Windows + Android + iOS 共用 UI 壳（M1 起；薄壳 re-export heart-core）
 apps/harmony/                # 鸿蒙 ArkTS 壳（M4 起）
 tools/keypath-tests/         # 跨端键路径契约：vectors.json + Rust 校验器
 docs/fixtures/               # 机器可读测试向量 + 生成脚本（Java/Python 双来源）
