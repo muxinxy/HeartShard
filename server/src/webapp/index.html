@@ -78,7 +78,7 @@ table.admin th { color: var(--muted); font-weight: 500; }
 .form-card label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 
 /* ---------- 模态 ---------- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 100; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 300; }
 .modal { width: 460px; max-width: 94vw; max-height: 84vh; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; }
 .modal h3 { margin: 0 0 12px; }
 .modal .close { float: right; background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
@@ -138,7 +138,7 @@ table.admin th { color: var(--muted); font-weight: 500; }
     <div class="topbar">
       <input type="search" id="search" placeholder="搜索照片 / 相册…">
       <span style="flex:1"></span>
-      <button class="primary" id="upload-btn" style="display:none">上传</button>
+      <button class="primary" id="upload-btn" style="display:none">⬆ 上传</button>
       <div style="position:relative">
         <div class="avatar" id="avatar">我</div>
         <div id="avatar-menu" style="display:none;position:absolute;right:0;top:44px;width:230px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 34px rgba(0,0,0,.4);padding:10px;z-index:150;text-align:center">
@@ -180,6 +180,8 @@ table.admin th { color: var(--muted); font-weight: 500; }
   </div>
 </div>
 <div id="modal-root"></div>
+<div id="ctx-root"></div>
+<input type="file" id="avatar-input" accept="image/*" style="display:none">
 <div id="toast"></div>
 <input type="file" id="file-input" multiple accept="image/*,video/*" style="display:none">
 

@@ -8,12 +8,13 @@
 use crate::acl::Perm;
 use crate::AppState;
 use axum::{
-    extract::{Path as AxumPathT, State},
+    extract::{Path as AxumPathT, Query, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::sync::Arc;
 
 use crate::api::{auth, err, s_err};
@@ -50,6 +51,9 @@ pub struct Share {
     pub created_at: u64,
     /// 过期时间（unix 秒）；None = 永不过期
     pub expires_at: Option<u64>,
+    /// 分享码的 sha256（hex）；空 = 无分享码
+    #[serde(default)]
+    pub access_code_hash: String,
 }
 
 fn default_kind() -> String {
@@ -98,6 +102,30 @@ fn check_expired(share: &Share) -> Result<(), Response> {
         if now() >= exp {
             return Err((StatusCode::GONE, "分享已过期").into_response());
         }
+    }
+    Ok(())
+}
+
+/// 校验分享码（无分享码的分享直接放行；meta/keys/pkg 三个端点都要过）。
+fn check_code(share: &Share, code: Option<&str>) -> Result<(), Response> {
+    if share.access_code_hash.is_empty() {
+        return Ok(());
+    }
+    let Some(code) = code else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "需要分享码", "need_code": true })),
+        )
+            .into_response());
+    };
+    let mut h = sha2::Sha256::new();
+    sha2::Digest::update(&mut h, code.as_bytes());
+    if hex::encode(sha2::Digest::finalize(h)) != share.access_code_hash {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "分享码错误", "need_code": true })),
+        )
+            .into_response());
     }
     Ok(())
 }
@@ -156,6 +184,7 @@ fn sanitize_and_encrypt(
 }
 
 /// 组装分享内容（密文缓存 + meta/keys），返回 share 记录。
+#[allow(clippy::too_many_arguments)]
 fn build_share(
     state: &AppState,
     kind: &str,
@@ -163,6 +192,7 @@ fn build_share(
     album_id: String,
     blob_hashes: Vec<String>,
     expires_days: Option<u64>,
+    access_code: Option<&str>,
 ) -> Result<(Share, serde_json::Value), Response> {
     let share_id = random_id();
     let cache_dir = state.share_cache_dir(&share_id);
@@ -213,6 +243,14 @@ fn build_share(
         blob_hashes,
         created_at: now(),
         expires_at: expires_days.map(|d| now() + d * 86400),
+        access_code_hash: match access_code.filter(|c| !c.is_empty()) {
+            Some(code) => {
+                let mut h = sha2::Sha256::new();
+                sha2::Digest::update(&mut h, code.as_bytes());
+                hex::encode(sha2::Digest::finalize(h))
+            }
+            None => String::new(),
+        },
     };
     let meta = serde_json::json!({
         "share_id": share_id,
@@ -298,7 +336,15 @@ pub async fn create_album_share(
     if hashes.is_empty() {
         return err(StatusCode::BAD_REQUEST, "相册中没有可分享的图片");
     }
-    let (share, _meta) = match build_share(&state, "album", album_name, album_id, hashes, req.expires_days) {
+    let (share, _meta) = match build_share(
+        &state,
+        "album",
+        album_name,
+        album_id,
+        hashes,
+        req.expires_days,
+        req.access_code.as_deref(),
+    ) {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -313,6 +359,8 @@ pub async fn create_album_share(
 pub struct CreateShareReq {
     /// 过期天数；缺省永不过期
     pub expires_days: Option<u64>,
+    /// 可选分享码（访问者需输入）
+    pub access_code: Option<String>,
 }
 
 /// POST /api/shares — 单张/多选分享（去元数据）。
@@ -322,6 +370,8 @@ pub struct CreateBlobsShareReq {
     pub expires_days: Option<u64>,
     /// 分享标题（默认用首个文件名）
     pub name: Option<String>,
+    /// 可选分享码
+    pub access_code: Option<String>,
 }
 
 pub async fn create_blobs_share(
@@ -342,7 +392,15 @@ pub async fn create_blobs_share(
     }
     let name = req.name.clone().unwrap_or_else(|| format!("{} 张照片", hashes.len()));
     let album_id = first_album_of(&state, &hashes).unwrap_or_default();
-    let (share, _meta) = match build_share(&state, "blobs", name, album_id, hashes, req.expires_days) {
+    let (share, _meta) = match build_share(
+        &state,
+        "blobs",
+        name,
+        album_id,
+        hashes,
+        req.expires_days,
+        req.access_code.as_deref(),
+    ) {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -375,11 +433,18 @@ pub async fn share_page(State(state): State<Arc<AppState>>, AxumPathT(id): AxumP
 }
 
 /// GET /s/{share_id}/meta — 文件清单（无密钥）。
-pub async fn share_meta(State(state): State<Arc<AppState>>, AxumPathT(id): AxumPathT<String>) -> Response {
+pub async fn share_meta(
+    State(state): State<Arc<AppState>>,
+    AxumPathT(id): AxumPathT<String>,
+    Query(code): Query<std::collections::HashMap<String, String>>,
+) -> Response {
     let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
+        return e;
+    }
+    if let Err(e) = check_code(&share, code.get("code").map(|s| s.as_str())) {
         return e;
     }
     let cache_dir = state.share_cache_dir(&share.id);
@@ -394,11 +459,18 @@ pub async fn share_meta(State(state): State<Arc<AppState>>, AxumPathT(id): AxumP
 }
 
 /// GET /s/{share_id}/keys — 密钥 JSON（查看器取用；no-store）。
-pub async fn share_keys(State(state): State<Arc<AppState>>, AxumPathT(id): AxumPathT<String>) -> Response {
+pub async fn share_keys(
+    State(state): State<Arc<AppState>>,
+    AxumPathT(id): AxumPathT<String>,
+    Query(code): Query<std::collections::HashMap<String, String>>,
+) -> Response {
     let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
+        return e;
+    }
+    if let Err(e) = check_code(&share, code.get("code").map(|s| s.as_str())) {
         return e;
     }
     let cache_dir = state.share_cache_dir(&share.id);
@@ -416,12 +488,16 @@ pub async fn share_keys(State(state): State<Arc<AppState>>, AxumPathT(id): AxumP
 pub async fn share_pkg(
     State(state): State<Arc<AppState>>,
     AxumPathT(path): AxumPathT<(String, String)>,
+    Query(code): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     let (id, hash) = path;
     let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
+        return e;
+    }
+    if let Err(e) = check_code(&share, code.get("code").map(|s| s.as_str())) {
         return e;
     }
     if hash.contains("..") || hash.contains('/') || hash.contains('\\') {

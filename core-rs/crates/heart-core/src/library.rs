@@ -945,6 +945,42 @@ impl HeartCore {
         Ok(())
     }
 
+    /// 删除相册（墓碑）：相册与其 blob 关联全部打墓碑（随增量同步），
+    /// **照片本体保留**（仍在「全部照片」与其他相册中）。
+    pub fn album_delete(&self, album_id: &str) -> Result<(), LibError> {
+        let db = self.db_or_err()?;
+        let me = db.device_id()?;
+        let existing = db
+            .load_albums()?
+            .into_iter()
+            .find(|v| v.record.id == album_id)
+            .ok_or_else(|| LibError::Data(format!("album {album_id} not found")))?;
+        let mut lamport = db.lamport()? + 1;
+        // 相册墓碑
+        let mut record = existing.record.clone();
+        record.deleted_at = Some(now_secs());
+        db.upsert_album(&Versioned {
+            lamport,
+            device_id: me.clone(),
+            record,
+        })?;
+        // 该相册的 blob_albums 关联墓碑（照片不删）
+        for mut v in db.load_blob_albums()?.into_iter() {
+            if v.record.album_id != album_id || v.record.deleted_at.is_some() {
+                continue;
+            }
+            lamport += 1;
+            v.record.deleted_at = Some(now_secs());
+            db.upsert_blob_album(&Versioned {
+                lamport,
+                device_id: me.clone(),
+                record: v.record,
+            })?;
+        }
+        db.set_lamport(lamport)?;
+        Ok(())
+    }
+
     /// 相册内容：该相册下的全部未删除 blob（按拍摄时间倒序）。
     pub fn list_album_blobs(&self, album_id: &str) -> Result<Vec<BlobEntry>, LibError> {
         let db = self.db_or_err()?;

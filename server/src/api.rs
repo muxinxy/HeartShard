@@ -115,6 +115,7 @@ pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
             "uid": user.uid,
             "name": user.name,
             "is_admin": user.is_admin,
+            "avatar": user.avatar,
         }))
         .into_response(),
         Err(e) => err(StatusCode::UNAUTHORIZED, e),
@@ -164,7 +165,7 @@ pub async fn logout(State(state): S, headers: HeaderMap) -> Response {
 pub async fn me(State(state): S, headers: HeaderMap) -> Response {
     match auth(&state, &headers) {
         Ok(user) => Json(serde_json::json!({
-            "uid": user.uid, "name": user.name, "is_admin": user.is_admin
+            "uid": user.uid, "name": user.name, "is_admin": user.is_admin, "avatar": user.avatar
         }))
         .into_response(),
         Err(e) => e,
@@ -397,6 +398,9 @@ pub async fn upload(
 // ---------------------------------------------------------------- blob 内容
 
 fn require_blob_view(state: &AppState, user: &User, blob_hash: &str) -> Result<(), Response> {
+    if user.is_admin {
+        return Ok(()); // admin 可预览任意 blob（含回收站）
+    }
     let core = state.core.lock().unwrap();
     let parents = parent_map(&core)?;
     let visible = visible_albums(&core, state, user, &parents)?;
@@ -540,6 +544,293 @@ pub async fn delete_blob(State(state): S, headers: HeaderMap, AxumPath(hash): Ax
     match core.delete_blob(&hash) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => s_err(e.to_string()),
+    }
+}
+
+/// POST /api/blobs/{hash}/rename —— 照片/视频重命名（manage 权限）。
+#[derive(Deserialize)]
+pub struct RenameReq {
+    pub new_name: String,
+}
+pub async fn rename_blob(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(hash): AxumPath<String>,
+    Json(req): Json<RenameReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    if let Err(e) = require_manage_on_blob(&state, &user, &hash) {
+        return e;
+    }
+    let core = state.core.lock().unwrap();
+    match core.rename_blob(&hash, &req.new_name) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
+/// POST /api/blobs/upload —— 无相册上传（multipart `file`；可选字段 album_id）。
+pub async fn upload_no_album(
+    State(state): S,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    // 读取文件 + 可选 album_id
+    let mut file_name = "upload.bin".to_string();
+    let mut album_id: Option<String> = None;
+    let mut wrote_any = false;
+    let mut staged: Option<std::path::PathBuf> = None;
+    let mut staged_out: Option<std::fs::File> = None;
+    let tmp_dir = std::env::temp_dir().join("heartshard-server-upload");
+    let upload_dir = tmp_dir.join(format!(
+        "{}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+        user.uid
+    ));
+    std::fs::create_dir_all(&upload_dir).ok();
+    while let Ok(Some(mut field)) = multipart.next_field().await {
+        match field.name().unwrap_or("") {
+            "album_id" => {
+                album_id = field.text().await.ok().filter(|s| !s.is_empty());
+                continue;
+            }
+            "file" => {}
+            _ => continue,
+        }
+        if let Some(name) = field.file_name() {
+            file_name = name.to_string();
+        }
+        if staged.is_none() {
+            let safe_name: String = file_name
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+                .collect();
+            let tmp = upload_dir.join(&safe_name);
+            let out = match std::fs::File::create(&tmp) {
+                Ok(f) => f,
+                Err(e) => return s_err(e.to_string()),
+            };
+            staged = Some(tmp);
+            staged_out = Some(out);
+        }
+        use std::io::Write;
+        let out = staged_out.as_mut().unwrap();
+        loop {
+            match field.chunk().await {
+                Ok(Some(chunk)) => {
+                    if out.write_all(&chunk).is_err() {
+                        return err(StatusCode::BAD_REQUEST, "上传写入失败");
+                    }
+                    wrote_any = true;
+                }
+                Ok(None) => break,
+                Err(_) => return err(StatusCode::BAD_REQUEST, "上传读取失败"),
+            }
+        }
+        break; // 只取第一个文件字段
+    }
+    if !wrote_any {
+        return err(StatusCode::BAD_REQUEST, "缺少文件字段");
+    }
+    let tmp = staged.unwrap();
+    drop(staged_out);
+
+    // 若指定相册：校验 upload 权限
+    if let Some(aid) = &album_id {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, aid, &parents) < Perm::Upload {
+            return err(StatusCode::FORBIDDEN, "无权向该相册上传");
+        }
+    }
+
+    let state2 = state.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let mut core = state2.core.lock().unwrap();
+        let outcome = core.import_file(&tmp).map_err(|e| e.to_string())?;
+        if matches!(outcome.status, ImportStatus::Imported | ImportStatus::SkippedDuplicate) {
+            if let Some(h) = &outcome.blob_hash {
+                if let Some(aid) = &album_id {
+                    core.album_add_blob(aid, h).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        Ok::<(String, Option<String>), String>((
+            format!("{:?}", outcome.status).to_lowercase(),
+            outcome.blob_hash,
+        ))
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&upload_dir);
+    match result {
+        Ok(Ok((status, hash))) => {
+            Json(serde_json::json!({ "status": status, "blob_hash": hash })).into_response()
+        }
+        Ok(Err(e)) => s_err(e),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
+/// POST /api/albums/{id}/add-blobs —— 批量把已有照片加入相册（复制到）。
+#[derive(Deserialize)]
+pub struct BlobsReq {
+    pub blob_hashes: Vec<String>,
+}
+pub async fn album_add_blobs(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<BlobsReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, &album_id, &parents) < Perm::Upload {
+            return err(StatusCode::FORBIDDEN, "无权向该相册添加照片");
+        }
+    }
+    let core = state.core.lock().unwrap();
+    let mut ok = 0;
+    for h in &req.blob_hashes {
+        if core.album_add_blob(&album_id, h).is_ok() {
+            ok += 1;
+        }
+    }
+    Json(serde_json::json!({ "added": ok })).into_response()
+}
+
+/// POST /api/albums/{id}/remove-blobs —— 批量从该相册移除（移动到 = 加入目标 + 从此处移除）。
+pub async fn album_remove_blobs(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<BlobsReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, &album_id, &parents) < Perm::Manage {
+            return err(StatusCode::FORBIDDEN, "无权从该相册移除照片");
+        }
+    }
+    let core = state.core.lock().unwrap();
+    let mut ok = 0;
+    for h in &req.blob_hashes {
+        if core.album_remove_blob(&album_id, h).is_ok() {
+            ok += 1;
+        }
+    }
+    Json(serde_json::json!({ "removed": ok })).into_response()
+}
+
+/// DELETE /api/albums/{id} —— 删除相册（照片保留；manage 权限）。
+pub async fn delete_album(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(album_id): AxumPath<String>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, &album_id, &parents) < Perm::Manage {
+            return err(StatusCode::FORBIDDEN, "无权删除该相册");
+        }
+    }
+    let core = state.core.lock().unwrap();
+    match core.album_delete(&album_id) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
+/// GET /api/blobs/orphans —— 未加入任何相册的照片/视频。
+pub async fn orphan_blobs(State(state): S, headers: HeaderMap) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    let core = state.core.lock().unwrap();
+    // 可见相册的成员并集 = 已归档；全量 - 已归档 = 孤儿
+    let parents = match parent_map(&core) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    let visible = match visible_albums(&core, &state, &user, &parents) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let mut archived: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (a, _) in &visible {
+        if let Ok(blobs) = core.list_album_blobs(&a.id) {
+            for b in blobs {
+                archived.insert(b.blob_hash);
+            }
+        }
+    }
+    let mut out: Vec<BlobEntry> = match core.list_blobs() {
+        Ok(list) => list,
+        Err(e) => return s_err(e.to_string()),
+    }
+    .into_iter()
+    .filter(|b| !archived.contains(&b.blob_hash))
+    .collect();
+    out.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
+    Json(out).into_response()
+}
+
+/// POST /api/me/avatar —— 设置个人头像（data URL，≤256KB）。
+#[derive(Deserialize)]
+pub struct AvatarReq {
+    pub data_url: String,
+}
+pub async fn set_avatar(State(state): S, headers: HeaderMap, Json(req): Json<AvatarReq>) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    if req.data_url.len() > 256 * 1024 {
+        return err(StatusCode::BAD_REQUEST, "头像图片过大（≤256KB）");
+    }
+    if !req.data_url.starts_with("data:image/") {
+        return err(StatusCode::BAD_REQUEST, "头像必须是图片");
+    }
+    match state.users.lock().unwrap().set_avatar(&user.uid, &req.data_url) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e),
     }
 }
 
@@ -712,6 +1003,12 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/blobs/{hash}/raw", get(raw))
         .route("/api/blobs/{hash}/favorite", post(set_favorite))
         .route("/api/blobs/{hash}/delete", post(delete_blob))
+        .route("/api/blobs/{hash}/rename", post(rename_blob))
+        .route("/api/blobs/upload", post(upload_no_album))
+        .route("/api/blobs/orphans", get(orphan_blobs))
+        .route("/api/albums/{id}/add-blobs", post(album_add_blobs))
+        .route("/api/albums/{id}/remove-blobs", post(album_remove_blobs))
+        .route("/api/albums/{id}", axum::routing::delete(delete_album))
         .route("/api/trash", get(trash_list))
         .route("/api/blobs/{hash}/restore", post(restore_blob))
         .route("/api/blobs/{hash}/purge", post(purge_blob))
@@ -727,4 +1024,5 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/s/{id}/keys", get(crate::share::share_keys))
         .route("/s/{id}/pkg/{hash}", get(crate::share::share_pkg))
         .layer(axum::middleware::from_fn(token_query_bridge))
+        .layer(axum::extract::DefaultBodyLimit::max(2048 * 1024 * 1024)) // 大视频上传（默认 2MB 会 ERR_CONNECTION_ABORTED）
 }

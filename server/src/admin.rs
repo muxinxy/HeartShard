@@ -59,6 +59,7 @@ pub struct UpdateUserReq {
     pub name: Option<String>,
     pub admin: Option<bool>,
     pub enabled: Option<bool>,
+    pub avatar: Option<String>,
 }
 
 pub async fn update_user(
@@ -74,7 +75,14 @@ pub async fn update_user(
         .users
         .lock()
         .unwrap()
-        .update_user(&uid, req.password.as_deref(), req.name.as_deref(), req.admin, req.enabled)
+        .update_user(
+            &uid,
+            req.password.as_deref(),
+            req.name.as_deref(),
+            req.admin,
+            req.enabled,
+            req.avatar.as_deref(),
+        )
     {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),

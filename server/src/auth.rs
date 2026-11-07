@@ -18,6 +18,9 @@ pub struct User {
     /// 是否启用（禁用 = 不能登录 + 会话吊销；默认启用，兼容旧 users.json）
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// 头像（data URL，≤256KB；空 = 用用户名首字）
+    #[serde(default)]
+    pub avatar: String,
 }
 
 fn default_true() -> bool {
@@ -89,13 +92,14 @@ impl UserStore {
             password_hash: hash_password(password)?,
             is_admin,
             enabled: true,
+            avatar: String::new(),
         };
         self.users.push(user.clone());
         self.save_users()?;
         Ok(user)
     }
 
-    /// 修改用户：口令（重哈希）/ 显示名 / admin / enabled；None 表示不改。
+    /// 修改用户：口令（重哈希）/ 显示名 / admin / enabled / avatar；None 表示不改。
     pub fn update_user(
         &mut self,
         uid: &str,
@@ -103,6 +107,7 @@ impl UserStore {
         name: Option<&str>,
         is_admin: Option<bool>,
         enabled: Option<bool>,
+        avatar: Option<&str>,
     ) -> Result<(), String> {
         let user_idx = self
             .users
@@ -141,6 +146,9 @@ impl UserStore {
                     .unwrap()
                     .retain(|_, v| v != uid);
             }
+        }
+        if let Some(av) = avatar {
+            self.users[user_idx].avatar = av.to_string();
         }
         self.save_users()
     }
@@ -211,6 +219,7 @@ impl UserStore {
                     password_hash: hash,
                     is_admin: u.admin,
                     enabled: true,
+                    avatar: String::new(),
                 }),
             }
         }
@@ -265,6 +274,17 @@ impl UserStore {
             .find(|u| u.uid == uid)
             .ok_or("用户不存在")?;
         user.password_hash = hash;
+        self.save_users()
+    }
+
+    /// 设置用户头像（data URL）。
+    pub fn set_avatar(&mut self, uid: &str, data_url: &str) -> Result<(), String> {
+        let user = self
+            .users
+            .iter_mut()
+            .find(|u| u.uid == uid)
+            .ok_or("用户不存在")?;
+        user.avatar = data_url.to_string();
         self.save_users()
     }
 
