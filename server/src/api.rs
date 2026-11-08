@@ -232,7 +232,15 @@ pub async fn create_album(State(state): S, headers: HeaderMap, Json(req): Json<C
         Ok(id) => id,
         Err(e) => return s_err(e.to_string()),
     };
-    // 新相册默认继承父权限（无显式条目）——无需写 ACL
+    // 根相册无父级可继承：显式授予 family 组 manage，否则普通用户永远看不到
+    if req.parent_id.is_none() {
+        let mut acl = state.acl.lock().unwrap();
+        let _ = acl.set(
+            &id,
+            crate::acl::Principal { kind: "group".into(), id: "family".into() },
+            Perm::Manage,
+        );
+    }
     Json(serde_json::json!({ "id": id })).into_response()
 }
 
@@ -358,7 +366,7 @@ pub async fn upload(
                 Err(_) => return err(StatusCode::BAD_REQUEST, "上传读取失败"),
             }
         }
-        break; // 只取第一个文件字段
+        // 不 break：album_id 等附加字段可能排在 file 之后，继续读完
     }
     if !wrote_any {
         return err(StatusCode::BAD_REQUEST, "缺少文件字段");
@@ -602,7 +610,7 @@ pub async fn upload_no_album(
         match field.name().unwrap_or("") {
             "album_id" => {
                 album_id = field.text().await.ok().filter(|s| !s.is_empty());
-                continue;
+                continue; // album_id 可能排在文件字段之后，不能提前退出循环
             }
             "file" => {}
             _ => continue,
@@ -637,7 +645,7 @@ pub async fn upload_no_album(
                 Err(_) => return err(StatusCode::BAD_REQUEST, "上传读取失败"),
             }
         }
-        break; // 只取第一个文件字段
+        // 不 break：album_id 等附加字段可能排在 file 之后，继续读完
     }
     if !wrote_any {
         return err(StatusCode::BAD_REQUEST, "缺少文件字段");

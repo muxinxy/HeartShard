@@ -88,7 +88,7 @@ table.admin th { color: var(--muted); font-weight: 500; }
 #lb-bar { display: flex; align-items: center; gap: 8px; padding: 12px 18px; color: #ddd; flex-shrink: 0; }
 #lb-bar button { background: none; border: 1px solid #444; color: #ddd; padding: 7px 13px; border-radius: 8px; cursor: pointer; font-size: 14px; }
 #lb-bar button:hover { border-color: #888; }
-#lb-stage { flex: 1; display: grid; place-items: center; overflow: hidden; cursor: grab; position: relative; }
+#lb-stage { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab; position: relative; min-height: 0; }
 #full-img { max-width: 100%; max-height: 100%; user-select: none; transform-origin: center center; }
 #lb-video { max-width: 96%; max-height: 100%; }
 #lb-tools { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(30,32,38,.9); border: 1px solid #3a3d45; border-radius: 12px; padding: 6px; z-index: 5; }
@@ -192,8 +192,10 @@ table.admin th { color: var(--muted); font-weight: 500; }
     <span id="lb-title" style="font-weight:600"></span>
     <span style="flex:1"></span>
     <button id="lb-fav">♡ 收藏</button>
+    <button id="lb-rename">✏️ 重命名</button>
     <button id="lb-share">🔗 分享</button>
     <button id="lb-detail">ℹ 详情</button>
+    <button id="lb-download">⬇ 下载</button>
     <button id="lb-trash" style="color:var(--danger)">🗑 回收站</button>
     <button id="lb-close">✕</button>
   </div>

@@ -254,9 +254,17 @@ function clearSelection() {
   const bar = document.querySelector(".selbar");
   if (bar) bar.remove();
 }
+let currentGroups = []; // 当前时间线分组（同步日期复选框状态用）
 function toggleSel(hash) {
   selected.has(hash) ? selected.delete(hash) : selected.add(hash);
   renderSelbar();
+  updateDayChecks();
+}
+function updateDayChecks() {
+  document.querySelectorAll("input[data-daykey]").forEach((c) => {
+    const g = currentGroups.find((x) => x.key === c.dataset.daykey);
+    if (g) c.checked = g.items.every((b) => selected.has(b.blob_hash));
+  });
 }
 function renderSelbar() {
   let bar = document.querySelector(".selbar");
@@ -293,14 +301,14 @@ function renderSelbar() {
         if (b) await downloadBlob(h, b.file_name);
       }
     };
-    $("sel-move").onclick = () => pickAlbumThen("move");
-    $("sel-copy").onclick = () => pickAlbumThen("copy");
+    $("sel-move").onclick = () => pickAlbumThen("move", [...selected]);
+    $("sel-copy").onclick = () => pickAlbumThen("copy", [...selected]);
     $("sel-cancel").onclick = () => { clearSelection(); route(); };
   }
   $("sel-count").textContent = selected.size;
 }
 // 选择目标相册（移动/复制）
-function pickAlbumThen(mode) {
+function pickAlbumThen(mode, hashes) {
   api("/api/albums").then((list) => {
     modal(`
       <h3>${mode === "move" ? "移动到相册" : "复制到相册"}</h3>
@@ -311,7 +319,6 @@ function pickAlbumThen(mode) {
     document.querySelectorAll("#modal-root .album-row").forEach((row) => {
       row.onclick = async () => {
         const aid = row.dataset.aid;
-        const hashes = [...selected];
         const op = mode === "move"
           ? api(`/api/albums/${aid}/move-blobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blob_hashes: hashes }) })
           : api(`/api/albums/${aid}/add-blobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blob_hashes: hashes }) });
@@ -412,6 +419,7 @@ function renderPhotoGrid() {
   v.innerHTML = "";
   if (list.length === 0) { v.innerHTML = `<p class="hint">没有照片。点右上角「⬆ 上传」导入。</p>`; return; }
   const groups = groupByDay(list);
+  currentGroups = groups;
   // 动态加载：先渲染 40 组，滚动到底加载更多
   const CHUNK = 40;
   let rendered = 0;
@@ -507,6 +515,8 @@ function photoMenuItems(b) {
     { label: "⬇ 下载原图", fn: () => downloadBlob(b.blob_hash, b.file_name) },
     { label: "🔗 分享", fn: () => shareDialog([b.blob_hash]) },
     { label: "ℹ 详情", fn: () => showBlobDetail(b) },
+    { label: "↪ 移动到相册", fn: () => pickAlbumThen("move", [b.blob_hash]) },
+    { label: "⧉ 复制到相册", fn: () => pickAlbumThen("copy", [b.blob_hash]) },
     { label: "🗑 移入回收站", fn: () => delBlob(b.blob_hash, b.file_name), danger: true },
   ];
 }
@@ -566,6 +576,9 @@ function openViewer(b) {
   lbTransform();
   $("lb-title").textContent = b.file_name;
   $("lb-fav").textContent = b.favorite ? "♥ 已收藏" : "♡ 收藏";
+  // 操作按钮与多选条一致：收藏/重命名/分享/详情/下载/回收站
+  $("lb-rename").style.display = "inline-block";
+  $("lb-download").style.display = "inline-block";
   const url = `/api/blobs/${b.blob_hash}/raw?token=${encodeURIComponent(token)}`;
   if (b.mime.startsWith("video/")) {
     // 视频用 <video> 在线播放（解密字节流直接喂给 video 元素）
@@ -646,6 +659,8 @@ $("lb-trash").onclick = () => {
 };
 $("lb-share").onclick = () => { if (lbCurrent) shareDialog([lbCurrent.blob_hash]); };
 $("lb-detail").onclick = () => { if (lbCurrent) showBlobDetail(lbCurrent); };
+$("lb-rename").onclick = () => { if (lbCurrent) renameDialog(lbCurrent); };
+$("lb-download").onclick = () => { if (lbCurrent) downloadBlob(lbCurrent.blob_hash, lbCurrent.file_name); };
 // 重命名入口放详情弹窗里（灯箱工具条空间有限）
 $("lb-zoom-in").onclick = () => { lbState.zoom = Math.min(8, lbState.zoom * 1.25); lbTransform(); };
 $("lb-zoom-out").onclick = () => { lbState.zoom = Math.max(0.2, lbState.zoom / 1.25); lbTransform(); };
@@ -711,7 +726,6 @@ async function viewExplore() {
     <h2 style="margin:6px 0">探索</h2>
     <h3 class="day-header">类别</h3>
     <div class="album-wall" id="exp-kinds">
-      ${card('data-kind="timeline"', "📅", "时间线", all.length)}
       ${card('data-kind="recent"', "🆕", "最近添加", recent.length)}
       ${card('data-kind="photo"', "🖼", "照片", photos.length)}
       ${card('data-kind="video"', "🎬", "视频", videos.length)}
@@ -724,7 +738,6 @@ async function viewExplore() {
       : `<div class="album-wall" id="exp-places">
           ${placeList.map(([k, items]) => card(`data-place="${k}"`, "📍", k, items.length)).join("")}
         </div>`}`;
-  v.querySelector('[data-kind="timeline"]').onclick = () => { location.hash = "#/photos"; };
   v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("🆕 最近添加", recent);
   v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("🖼 照片", (b) => b.mime.startsWith("image/"));
   v.querySelector('[data-kind="video"]').onclick = () => openFiltered("🎬 视频", (b) => b.mime.startsWith("video/"));
@@ -734,16 +747,29 @@ async function viewExplore() {
     c.onclick = () => openFiltered(`📍 ${c.dataset.place}`, places.get(c.dataset.place) || []);
   });
 }
+// 过滤结果按时间线排列（按天分组 + 日期头）
 function openFiltered(title, predOrItems) {
   const list = Array.isArray(predOrItems) ? predOrItems : blobs.filter(predOrItems);
   const v = $("view");
   v.innerHTML = `
     <div class="row"><h2 style="margin:6px 0">${title}</h2><span class="badge">${list.length} 张</span>
       <button style="margin-left:auto" id="back-explore">← 返回探索</button></div>
-    <div id="filtered-grid" class="grid"></div>`;
-  const grid = $("filtered-grid");
-  for (const b of list) grid.appendChild(photoCell(b));
-  if (list.length === 0) grid.innerHTML = `<p class="hint">没有内容。</p>`;
+    <div id="filtered-body"></div>`;
+  const body = $("filtered-body");
+  const groups = groupByDay(list);
+  currentGroups = groups;
+  if (list.length === 0) { body.innerHTML = `<p class="hint">没有内容。</p>`; return; }
+  for (const g of groups) {
+    if (g.type === "sep") {
+      body.insertAdjacentHTML("beforeend", `<div class="day-header" style="color:var(--primary)">—— ${g.label} ——</div>`);
+      continue;
+    }
+    body.insertAdjacentHTML("beforeend", `<div class="day-header">${g.label} · ${g.items.length} 张</div>`);
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    for (const b of g.items) grid.appendChild(photoCell(b));
+    body.appendChild(grid);
+  }
   $("back-explore").onclick = () => { location.hash = "#/explore"; route(); };
   $("years").innerHTML = "";
 }
@@ -892,21 +918,42 @@ async function openAclEditor(a) {
   const users = me.is_admin ? await api("/api/admin/users").catch(() => []) : [];
   const groups = me.is_admin ? await api("/api/admin/groups").catch(() => []) : [];
   const PERM_LABEL = { none: "隐藏", view: "只看", upload: "上传", manage: "管理" };
+  const isRoot = !a.parent_id;
   const rowFor = (kind, id, label, cur) => `
     <tr><td>${kind === "user" ? "👤" : "🏷"} ${label}</td><td>${cur ? PERM_LABEL[cur] || cur : "继承"}</td><td>
       <select onchange="setAcl('${a.id}','${kind}','${id}',this.value)">
         <option value="">继承</option>
         ${["none", "view", "upload", "manage"].map((p) => `<option value="${p}" ${cur === p ? "selected" : ""}>${PERM_LABEL[p]}</option>`).join("")}
       </select></td></tr>`;
+  const userRows = users.map((u) => {
+    const hit = acl.find((e) => e.principal.kind === "user" && e.principal.id === u.uid);
+    return rowFor("user", u.uid, u.name, hit ? hit.perm : "");
+  }).join("");
+  const groupRows = groups.map((g) => {
+    const hit = acl.find((e) => e.principal.kind === "group" && e.principal.id === g.gid);
+    return rowFor("group", g.gid, g.name, hit ? hit.perm : "");
+  }).join("");
   modal(`
     <h3>权限：${a.name}</h3>
-    <p class="hint">子相册默认继承；显式设置覆盖继承；同一层级用户设置优先于组。</p>
-    <table class="admin"><tr><th>对象</th><th>当前</th><th>设置</th></tr>
-      ${acl.filter((e) => e.principal.kind === "user").map((e) => rowFor("user", e.principal.id, users.find((u) => u.uid === e.principal.id)?.name || e.principal.id, e.perm)).join("")}
-      ${acl.filter((e) => e.principal.kind === "group").map((e) => rowFor("group", e.principal.id, groups.find((g) => g.gid === e.principal.id)?.name || e.principal.id, e.perm)).join("")}
-      ${users.map((u) => acl.some((e) => e.principal.kind === "user" && e.principal.id === u.uid) ? "" : rowFor("user", u.uid, u.name, "")).join("")}
-      ${groups.map((g) => acl.some((e) => e.principal.kind === "group" && e.principal.id === g.gid) ? "" : rowFor("group", g.gid, g.name, "")).join("")}
-    </table>`);
+    ${isRoot ? `<p class="hint">根相册没有父级可继承——未显式设置权限的用户/组将看不到此相册（管理员始终可见）。创建根相册时已默认授予 family 组「管理」。</p>` : `<p class="hint">子相册默认继承上级权限；显式设置覆盖继承；同一层级用户设置优先于组。</p>`}
+    <div class="row" style="margin:8px 0">
+      <button class="primary" id="acl-tab-user">👤 用户</button>
+      <button id="acl-tab-group">🏷 用户组</button>
+    </div>
+    <table class="admin" id="acl-users"><tr><th>对象</th><th>当前</th><th>设置</th></tr>${userRows}</table>
+    <table class="admin" id="acl-groups" style="display:none"><tr><th>对象</th><th>当前</th><th>设置</th></tr>${groupRows}</table>`);
+  $("acl-tab-user").onclick = () => {
+    $("acl-users").style.display = "table";
+    $("acl-groups").style.display = "none";
+    $("acl-tab-user").classList.add("primary");
+    $("acl-tab-group").classList.remove("primary");
+  };
+  $("acl-tab-group").onclick = () => {
+    $("acl-users").style.display = "none";
+    $("acl-groups").style.display = "table";
+    $("acl-tab-group").classList.add("primary");
+    $("acl-tab-user").classList.remove("primary");
+  };
 }
 window.setAcl = async (albumId, kind, id, perm) => {
   try {

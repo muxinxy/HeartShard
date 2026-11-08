@@ -164,10 +164,17 @@ async fn auth_and_acl_and_upload() {
     assert_eq!(res.status(), StatusCode::OK);
     let a_trip = json_body(res).await["id"].as_str().unwrap().to_string();
 
-    // bob（family 组）在根上无显式权限 → 全部相册不可见
+    // 根相册创建时自动授予 family 组 manage → bob 经继承可见 2024 和 旅行
     let res = get(&app, "/api/albums", &bob).await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(json_body(res).await.as_array().unwrap().is_empty());
+    let albums_json = json_body(res).await;
+    let names: Vec<String> = albums_json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.contains(&"2024".to_string()) && names.contains(&"旅行".to_string()), "{names:?}");
 
     // admin 给 family 组在 2024 设 view → bob 经继承可见 2024 和 旅行
     let res = app
