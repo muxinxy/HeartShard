@@ -782,19 +782,28 @@ function openFiltered(title, predOrItems) {
   const groups = groupByDay(list);
   currentGroups = groups;
   if (list.length === 0) { body.innerHTML = `<p class="hint">没有内容。</p>`; return; }
+  // 年份锚点（右侧时间轴，与时间线一致）
+  const years = [...new Set(list.filter((b) => b.taken_at).map((b) => new Date(b.taken_at * 1000).getFullYear()))].sort((a, b) => b - a);
+  $("years").innerHTML = years.map((y) => `<div data-year="${y}">${y}</div>`).join("");
+  document.querySelectorAll("#years div").forEach((el) => {
+    el.onclick = () => document.querySelector(`#filtered-body [data-anchor="${el.dataset.year}"]`)?.scrollIntoView({ behavior: "smooth" });
+  });
   for (const g of groups) {
     if (g.type === "sep") {
       body.insertAdjacentHTML("beforeend", `<div class="day-header" style="color:var(--primary)">—— ${g.label} ——</div>`);
       continue;
     }
-    body.insertAdjacentHTML("beforeend", `<div class="day-header">${g.label} · ${g.items.length} 张</div>`);
+    const header = document.createElement("div");
+    header.className = "day-header";
+    if (g.date && !document.querySelector(`#filtered-body [data-anchor="${g.date.getFullYear()}"]`)) header.setAttribute("data-anchor", g.date.getFullYear());
+    header.textContent = `${g.label} · ${g.items.length} 张`;
+    body.appendChild(header);
     const grid = document.createElement("div");
     grid.className = "grid";
     for (const b of g.items) grid.appendChild(photoCell(b));
     body.appendChild(grid);
   }
   $("back-explore").onclick = () => { location.hash = "#/explore"; route(); };
-  $("years").innerHTML = "";
 }
 
 // ---------------- 收藏夹 ----------------
