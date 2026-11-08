@@ -135,6 +135,11 @@ table.admin th { color: var(--muted); font-weight: 500; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint { color: var(--muted); font-size: 13px; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--input); color: var(--muted); white-space: nowrap; }
+table.admin td { word-break: break-all; }
+.modal { width: min(520px, 94vw); overflow-x: hidden; }
+html, body { height: 100%; }
+#app.layout { height: 100vh; }
+.main { overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -162,7 +167,6 @@ table.admin th { color: var(--muted); font-weight: 500; }
     <a data-view="admin-sources" id="nav-admin-sources" style="display:none">🔄 同步源</a>
     <a data-view="admin-status" id="nav-admin-status" style="display:none">📊 系统状态</a>
     <div style="flex:1"></div>
-    <a id="theme-toggle">🌓 浅色 / 深色</a>
   </nav>
   <div class="main">
     <div class="topbar">
@@ -191,12 +195,14 @@ table.admin th { color: var(--muted); font-weight: 500; }
   <div id="lb-bar">
     <span id="lb-title" style="font-weight:600"></span>
     <span style="flex:1"></span>
-    <button id="lb-fav">♡ 收藏</button>
+    <button id="lb-fav">⭐ 收藏</button>
     <button id="lb-rename">✏️ 重命名</button>
     <button id="lb-share">🔗 分享</button>
-    <button id="lb-detail">ℹ 详情</button>
-    <button id="lb-download">⬇ 下载</button>
-    <button id="lb-trash" style="color:var(--danger)">🗑 回收站</button>
+    <button id="lb-detail">ℹ️ 详情</button>
+    <button id="lb-download">⬇️ 下载</button>
+    <button id="lb-move">↪️ 移动到</button>
+    <button id="lb-copy">⧉️ 复制到</button>
+    <button id="lb-trash" style="color:var(--danger)">🗑️ 回收站</button>
     <button id="lb-close">✕</button>
   </div>
   <div id="lb-stage">

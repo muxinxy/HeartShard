@@ -161,7 +161,6 @@ function toggleTheme() {
   $("menu-theme").textContent = light ? "☀️ 浅色模式" : "🌙 深色模式";
 }
 $("menu-theme").onclick = toggleTheme;
-$("theme-toggle").onclick = toggleTheme;
 // 头像上传（点菜单大头像 → 选图 → 缩到 256px → data URL）
 $("menu-avatar").onclick = () => $("avatar-input").click();
 $("avatar-input").onchange = async () => {
@@ -202,6 +201,8 @@ $("menu-password").onclick = () => {
   });
 };
 if (localStorage.getItem("hs_theme") === "light") document.body.classList.add("theme-light");
+// 深浅色菜单项初始文案
+$("menu-theme").textContent = document.body.classList.contains("theme-light") ? "☀️ 浅色模式" : "🌙 深色模式";
 
 if (token) {
   api("/api/me").then((u) => { me = u; showMain(); }).catch(() => showLogin());
@@ -261,8 +262,8 @@ function toggleSel(hash) {
   updateDayChecks();
 }
 function updateDayChecks() {
-  document.querySelectorAll("input[data-daykey]").forEach((c) => {
-    const g = currentGroups.find((x) => x.key === c.dataset.daykey);
+  document.querySelectorAll("input[data-day]").forEach((c) => {
+    const g = currentGroups.find((x) => x.key === c.dataset.day);
     if (g) c.checked = g.items.every((b) => selected.has(b.blob_hash));
   });
 }
@@ -278,18 +279,38 @@ function renderSelbar() {
       <button id="sel-rename">✏️ 重命名</button>
       <button id="sel-share">🔗 分享</button>
       <button id="sel-detail">ℹ️ 详情</button>
-      <button id="sel-download">⬇ 下载</button>
-      <button id="sel-move">↪ 移动到</button>
-      <button id="sel-copy">⧉ 复制到</button>
-      <button class="danger" id="sel-trash">🗑 回收站</button>
+      <button id="sel-download">⬇️ 下载</button>
+      <button id="sel-move">↪️ 移动到</button>
+      <button id="sel-copy">⧉️ 复制到</button>
+      <button class="danger" id="sel-trash">🗑️ 回收站</button>
       <button id="sel-cancel">取消</button>`;
     document.body.appendChild(bar);
     $("sel-fav").onclick = () => batch((h) => api(`/api/blobs/${h}/favorite`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ favorite: true }) }), "已收藏");
-    $("sel-rename").onclick = batchRenameDialog;
+    $("sel-rename").onclick = () => {
+      if (selected.size === 1) {
+        const b = blobs.find((x) => selected.has(x.blob_hash));
+        if (b) renameDialog(b);
+      } else batchRenameDialog();
+    };
     $("sel-share").onclick = () => shareDialog([...selected]);
     $("sel-detail").onclick = () => {
-      const first = blobs.find((b) => selected.has(b.blob_hash));
-      if (first) showBlobDetail(first);
+      if (selected.size === 1) {
+        const first = blobs.find((b) => selected.has(b.blob_hash));
+        if (first) showBlobDetail(first);
+        return;
+      }
+      // 多选详情：数量 + 总大小
+      let total = 0, n = 0, vids = 0;
+      for (const h of selected) {
+        const b = blobs.find((x) => x.blob_hash === h);
+        if (b) { n++; total += b.total_len; if (b.mime.startsWith("video/")) vids++; }
+      }
+      modal(`<h3>详情（${n} 项）</h3>
+        <table class="admin">
+          <tr><td>数量</td><td>${n} 项（视频 ${vids} 个）</td></tr>
+          <tr><td>总大小</td><td>${(total / 1048576).toFixed(2)} MB</td></tr>
+        </table>
+        <div class="row" style="justify-content:flex-end"><button onclick="closeModal()">关闭</button></div>`);
     };
     $("sel-trash").onclick = () => uiConfirm("移入回收站", `把选中的 ${selected.size} 张照片移入回收站？碎片保留，可恢复。`, async () => {
       await batch((h) => api(`/api/blobs/${h}/delete`, { method: "POST" }), "已移入回收站");
@@ -659,8 +680,10 @@ $("lb-trash").onclick = () => {
 };
 $("lb-share").onclick = () => { if (lbCurrent) shareDialog([lbCurrent.blob_hash]); };
 $("lb-detail").onclick = () => { if (lbCurrent) showBlobDetail(lbCurrent); };
-$("lb-rename").onclick = () => { if (lbCurrent) renameDialog(lbCurrent); };
-$("lb-download").onclick = () => { if (lbCurrent) downloadBlob(lbCurrent.blob_hash, lbCurrent.file_name); };
+  $("lb-rename").onclick = () => { if (lbCurrent) renameDialog(lbCurrent); };
+  $("lb-download").onclick = () => { if (lbCurrent) downloadBlob(lbCurrent.blob_hash, lbCurrent.file_name); };
+  $("lb-move").onclick = () => { if (lbCurrent) pickAlbumThen("move", [lbCurrent.blob_hash]); };
+  $("lb-copy").onclick = () => { if (lbCurrent) pickAlbumThen("copy", [lbCurrent.blob_hash]); };
 // 重命名入口放详情弹窗里（灯箱工具条空间有限）
 $("lb-zoom-in").onclick = () => { lbState.zoom = Math.min(8, lbState.zoom * 1.25); lbTransform(); };
 $("lb-zoom-out").onclick = () => { lbState.zoom = Math.max(0.2, lbState.zoom / 1.25); lbTransform(); };
