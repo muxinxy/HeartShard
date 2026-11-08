@@ -84,16 +84,46 @@ table.admin th { color: var(--muted); font-weight: 500; }
 .modal .close { float: right; background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
 
 /* ---------- 灯箱 ---------- */
-#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; z-index: 120; flex-direction: column; }
+#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.96); display: none; z-index: 120; flex-direction: column; overflow: hidden; }
 #lb-bar { display: flex; align-items: center; gap: 8px; padding: 12px 18px; color: #ddd; flex-shrink: 0; }
 #lb-bar button { background: none; border: 1px solid #444; color: #ddd; padding: 7px 13px; border-radius: 8px; cursor: pointer; font-size: 14px; }
 #lb-bar button:hover { border-color: #888; }
-#lb-stage { flex: 1; display: grid; place-items: center; overflow: hidden; cursor: grab; }
-#full-img { max-width: 96%; max-height: 100%; user-select: none; transform-origin: center center; }
-#lb-tools { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(30,32,38,.9); border: 1px solid #3a3d45; border-radius: 12px; padding: 6px; }
+#lb-stage { flex: 1; display: grid; place-items: center; overflow: hidden; cursor: grab; position: relative; }
+#full-img { max-width: 100%; max-height: 100%; user-select: none; transform-origin: center center; }
+#lb-video { max-width: 96%; max-height: 100%; }
+#lb-tools { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(30,32,38,.9); border: 1px solid #3a3d45; border-radius: 12px; padding: 6px; z-index: 5; }
 #lb-tools button { background: none; border: none; color: #ddd; font-size: 17px; width: 40px; height: 34px; border-radius: 8px; cursor: pointer; }
 #lb-tools button:hover { background: rgba(255,255,255,.12); }
 .cell .check { opacity: .85; }
+
+/* ---------- 右键菜单（鼠标位置弹出） ---------- */
+.menu-overlay { position: fixed; inset: 0; z-index: 900; }
+.ctx-menu {
+  position: fixed;
+  z-index: 901;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  padding: 4px;
+}
+.ctx-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 9px 14px;
+  font-size: 14px;
+  color: var(--fg);
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.ctx-menu button:hover { background: var(--secondary, rgba(128,128,128,.15)); }
+.ctx-menu button.danger { color: var(--danger); }
 
 /* ---------- 登录 ---------- */
 #login { max-width: 360px; margin: 120px auto; padding: 40px 32px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; text-align: center; }

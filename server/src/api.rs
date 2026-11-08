@@ -750,6 +750,55 @@ pub async fn album_remove_blobs(
     Json(serde_json::json!({ "removed": ok })).into_response()
 }
 
+/// POST /api/albums/{id}/move-blobs —— 批量移动：加入目标相册，并从照片当前
+/// 所在的其他相册移除（照片本体不动，只改关联）。
+pub async fn album_move_blobs(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<BlobsReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, &album_id, &parents) < Perm::Upload {
+            return err(StatusCode::FORBIDDEN, "无权向该相册移动照片");
+        }
+    }
+    let core = state.core.lock().unwrap();
+    // 相册 → 成员集合（一次构建）
+    let mut members: Vec<(String, std::collections::HashSet<String>)> = Vec::new();
+    for a in core.list_albums().unwrap_or_default() {
+        let set: std::collections::HashSet<String> = core
+            .list_album_blobs(&a.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| b.blob_hash)
+            .collect();
+        members.push((a.id, set));
+    }
+    let mut moved = 0;
+    for h in &req.blob_hashes {
+        // 从除目标外的所有相册移除
+        for (aid, set) in &members {
+            if *aid != album_id && set.contains(h) {
+                let _ = core.album_remove_blob(aid, h);
+            }
+        }
+        if core.album_add_blob(&album_id, h).is_ok() {
+            moved += 1;
+        }
+    }
+    Json(serde_json::json!({ "moved": moved })).into_response()
+}
+
 /// DELETE /api/albums/{id} —— 删除相册（照片保留；manage 权限）。
 pub async fn delete_album(
     State(state): S,
@@ -1008,6 +1057,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/blobs/orphans", get(orphan_blobs))
         .route("/api/albums/{id}/add-blobs", post(album_add_blobs))
         .route("/api/albums/{id}/remove-blobs", post(album_remove_blobs))
+        .route("/api/albums/{id}/move-blobs", post(album_move_blobs))
         .route("/api/albums/{id}", axum::routing::delete(delete_album))
         .route("/api/trash", get(trash_list))
         .route("/api/blobs/{hash}/restore", post(restore_blob))

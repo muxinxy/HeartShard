@@ -944,7 +944,10 @@ async function viewShares() {
         <td>${s.access_code_hash ? "有" : "—"}</td>
         <td>${s.expires_at ? new Date(s.expires_at * 1000).toLocaleString() : "永久"}</td>
         <td><button onclick="showShareList('${s.id}')">查看内容</button></td>
-        <td class="row"><button onclick="copyShare('${s.id}')">复制链接</button></td></tr>`).join("")}
+        <td class="row">
+          <button onclick="copyShare('${s.id}')">复制链接</button>
+          <button class="danger" onclick="cancelShare('${s.id}')">取消分享</button>
+        </td></tr>`).join("")}
     </table>
     ${pages > 1 ? `<div class="row" style="justify-content:center;margin-top:12px">
       <button ${sharePage === 0 ? "disabled" : ""} id="sh-prev">‹ 上一页</button>
@@ -986,6 +989,12 @@ window.copyShare = async (id) => {
   await navigator.clipboard.writeText(location.origin + `/s/${id}`).catch(() => {});
   toast("链接已复制");
 };
+window.cancelShare = (id) => {
+  uiConfirm("取消分享", "取消后链接立即失效，确定？", async () => {
+    await api(`/api/shares/${id}`, { method: "DELETE" });
+    route();
+  }, true);
+};
 window.showShareList = async (id) => {
   try {
     const meta = await fetch(`/s/${id}/meta`).then((r) => r.json());
@@ -1001,6 +1010,7 @@ window.showShareList = async (id) => {
 // 分享清单预览（所有者侧走 /api/blobs/{hash}/raw）
 window.previewShared = (fJson) => {
   const f = typeof fJson === "string" ? JSON.parse(fJson) : fJson;
+  closeModal(); // 避免弹窗压在预览层上
   const b = blobs.find((x) => x.blob_hash === f.hash);
   if (b) { openViewer(b); return; }
   openViewer({ blob_hash: f.hash, mime: f.mime, file_name: f.name, favorite: false, total_len: 0, taken_at: f.taken_at || 0, gps_lat: null, gps_lon: null });
