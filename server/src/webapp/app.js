@@ -778,6 +778,8 @@ function openFiltered(title, predOrItems) {
     <div class="row"><h2 style="margin:6px 0">${title}</h2><span class="badge">${list.length} 张</span>
       <button style="margin-left:auto" id="back-explore">← 返回探索</button></div>
     <div id="filtered-body"></div>`;
+  // 绑定返回事件必须先于空列表 early-return（否则空页面上按钮无事件）
+  $("back-explore").onclick = () => { location.hash = "#/explore"; route(); };
   const body = $("filtered-body");
   const groups = groupByDay(list);
   currentGroups = groups;
