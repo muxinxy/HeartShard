@@ -35,8 +35,6 @@ pub fn auth(state: &AppState, headers: &HeaderMap) -> Result<User, Response> {
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "缺少会话令牌"))?;
     state
         .users
-        .lock()
-        .unwrap()
         .verify(token)
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "会话无效或已过期"))
 }
@@ -89,8 +87,8 @@ pub async fn token_query_bridge(
 }
 
 fn effective(state: &AppState, user: &User, album_id: &str, parents: &HashMap<String, Option<String>>) -> Perm {
-    let groups = state.users.lock().unwrap().groups_of(&user.uid);
-    state.acl.lock().unwrap().effective(user, &groups, album_id, parents)
+    let groups = state.users.groups_of(&user.uid);
+    state.acl.effective(user, &groups, album_id, parents)
 }
 
 /// 用户可见（view+）的相册集合。
@@ -101,8 +99,8 @@ fn visible_albums(
     parents: &HashMap<String, Option<String>>,
 ) -> Result<Vec<(AlbumInfo, Perm)>, Response> {
     let albums = core.list_albums().map_err(|e| s_err(e.to_string()))?;
-    let groups = state.users.lock().unwrap().groups_of(&user.uid);
-    let acl = state.acl.lock().unwrap();
+    let groups = state.users.groups_of(&user.uid);
+    let acl = &state.acl;
     Ok(albums
         .into_iter()
         .filter_map(|a| {
@@ -121,7 +119,7 @@ pub struct LoginReq {
 }
 
 pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
-    match state.users.lock().unwrap().login(&req.name, &req.password) {
+    match state.users.login(&req.name, &req.password) {
         Ok((token, user)) => Json(serde_json::json!({
             "token": token,
             "uid": user.uid,
@@ -150,7 +148,7 @@ pub async fn change_own_password(
         Ok(u) => u,
         Err(e) => return e,
     };
-    match state.users.lock().unwrap().change_own_password(&user.uid, &req.old, &req.new) {
+    match state.users.change_own_password(&user.uid, &req.old, &req.new) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
@@ -246,7 +244,7 @@ pub async fn create_album(State(state): S, headers: HeaderMap, Json(req): Json<C
     };
     // 根相册无父级可继承：显式授予 family 组 manage，否则普通用户永远看不到
     if req.parent_id.is_none() {
-        let mut acl = state.acl.lock().unwrap();
+        let acl = &state.acl;
         let _ = acl.set(
             &id,
             crate::acl::Principal { kind: "group".into(), id: "family".into() },
@@ -516,8 +514,8 @@ fn require_manage_on_blob(state: &AppState, user: &User, hash: &str) -> Result<(
     }
     let core = state.core.lock().unwrap();
     let parents = parent_map(&core)?;
-    let groups = state.users.lock().unwrap().groups_of(&user.uid);
-    let acl = state.acl.lock().unwrap();
+    let groups = state.users.groups_of(&user.uid);
+    let acl = &state.acl;
     for album_id in core.list_albums().unwrap_or_default().iter().map(|a| a.id.clone()) {
         if let Ok(blobs) = core.list_album_blobs(&album_id) {
             if blobs.iter().any(|b| b.blob_hash == hash)
@@ -902,7 +900,7 @@ pub async fn set_avatar(State(state): S, headers: HeaderMap, Json(req): Json<Ava
     if !req.data_url.starts_with("data:image/") {
         return err(StatusCode::BAD_REQUEST, "头像必须是图片");
     }
-    match state.users.lock().unwrap().set_avatar(&user.uid, &req.data_url) {
+    match state.users.set_avatar(&user.uid, &req.data_url) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => s_err(e),
     }
@@ -1015,7 +1013,7 @@ pub async fn set_acl(
         return err(StatusCode::FORBIDDEN, "无权管理该相册");
     }
     drop(core);
-    let mut acl = state.acl.lock().unwrap();
+    let acl = &state.acl;
     match &req.perm {
         Some(p) => match Perm::parse(p) {
             Some(perm) => match acl.set(&album_id, req.principal, perm) {
@@ -1044,7 +1042,7 @@ pub async fn get_acl(State(state): S, headers: HeaderMap, AxumPath(album_id): Ax
     if effective(&state, &user, &album_id, &parents) < Perm::Manage {
         return err(StatusCode::FORBIDDEN, "无权管理该相册");
     }
-    let acl = state.acl.lock().unwrap();
+    let acl = &state.acl;
     Json(acl.for_album(&album_id)).into_response()
 }
 
@@ -1094,6 +1092,9 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/admin/groups", get(crate::admin::list_groups).post(crate::admin::set_groups))
         .route("/api/admin/sources", get(crate::admin::list_sources).post(crate::admin::set_sources))
         .route("/api/admin/status", get(crate::admin::status))
+        .route("/api/admin/storage", get(crate::storage::list_storage).post(crate::storage::add_storage))
+        .route("/api/admin/storage/{id}", axum::routing::delete(crate::storage::remove_storage))
+        .route("/api/admin/storage/verify", post(crate::storage::verify_storage))
         .route("/s/{id}", get(crate::share::share_page))
         .route("/s/{id}/meta", get(crate::share::share_meta))
         .route("/s/{id}/keys", get(crate::share::share_keys))

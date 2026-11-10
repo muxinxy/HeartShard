@@ -107,7 +107,7 @@ function showMain() {
   setAvatarUi($("menu-avatar"), u);
   $("menu-name").textContent = u.name || "我";
   const isAdmin = !!u.is_admin;
-  ["admin-users", "admin-groups", "admin-sources", "admin-status"].forEach((v) => {
+  ["admin-users", "admin-groups", "admin-sources", "admin-storage", "admin-status"].forEach((v) => {
     $(`nav-${v}`).style.display = isAdmin ? "flex" : "none";
   });
   $("admin-sec").style.display = isAdmin ? "block" : "none";
@@ -237,6 +237,7 @@ function route() {
     "admin-users": viewAdminUsers,
     "admin-groups": viewAdminGroups,
     "admin-sources": viewAdminSources,
+    "admin-storage": viewAdminStorage,
     "admin-status": viewAdminStatus,
   };
   $("view").innerHTML = `<p class="hint">加载中…</p>`;
@@ -1503,6 +1504,85 @@ window.delSource = async (sid) => {
   const cur = (await api("/api/admin/sources")).filter((s) => s.id !== sid);
   await api("/api/admin/sources", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(cur) });
   route();
+};
+
+// ---------------- 管理：存储管理（网页端配置云存储） ----------------
+const STORAGE_KINDS = { local: "本地目录", s3: "S3 兼容", webdav: "WebDAV", openlist: "OpenList" };
+async function viewAdminStorage() {
+  const list = await api("/api/admin/storage").catch(() => []);
+  $("view").innerHTML = `
+    <h2 style="margin:6px 0">存储管理</h2>
+    <p class="hint">云存储配置经相册库加密注册表落盘（凭据不以明文存后台）。删除 Storage 不删除已上传的分片数据。</p>
+    <table class="admin"><tr><th>ID</th><th>类型</th><th>操作</th></tr>
+      ${list.map((s) => `
+        <tr><td>${s.id}</td><td>${STORAGE_KINDS[s.kind] || s.kind}</td>
+        <td class="row">
+          <button onclick="verifyStorage('${s.id}')">测连通</button>
+          <button class="danger" onclick="delStorage('${s.id}')">删除</button>
+        </td></tr>`).join("") || `<tr><td colspan="3" class="hint">还没有 Storage。</td></tr>`}
+    </table>
+    <div class="form-card" style="display:block">
+      <strong>添加 Storage</strong>
+      <div class="row" style="margin-top:8px">
+        <select id="st-kind">
+          <option value="local">本地目录</option>
+          <option value="s3">S3 兼容</option>
+          <option value="webdav">WebDAV</option>
+          <option value="openlist">OpenList</option>
+        </select>
+        <input id="st-id" placeholder="名称（可选，默认自动）">
+        <input id="st-root" placeholder="本地目录路径">
+        <button class="primary" id="st-add">添加</button>
+      </div>
+      <div id="st-extra"></div>
+    </div>`;
+  const kindSel = $("st-kind");
+  const renderExtra = () => {
+    const k = kindSel.value;
+    const f = (id, ph) => `<input id="${id}" placeholder="${ph}" style="min-width:220px">`;
+    $("st-extra").innerHTML = {
+      local: "",
+      s3: `${f("st-endpoint", "endpoint（https://s3…）")}${f("st-bucket", "bucket")}${f("st-ak", "access_key")}${f("st-sk", "secret_key")}${f("st-region", "region（默认 us-east-1）")}`,
+      webdav: `${f("st-endpoint", "base_url（https://dav…）")}${f("st-user", "用户名")}${f("st-pass", "密码")}`,
+      openlist: `${f("st-endpoint", "base_url（http://…:5244）")}${f("st-user", "用户名")}${f("st-pass", "密码")}${f("st-base", "base_path（默认 /heartshard）")}`,
+    }[k];
+    $("st-root").style.display = k === "local" ? "inline-block" : "none";
+  };
+  renderExtra();
+  kindSel.onchange = renderExtra;
+  $("st-add").onclick = async () => {
+    const k = kindSel.value;
+    const body = { kind: k, id: $("st-id").value || null, root: $("st-root").value || null };
+    if (k === "s3") Object.assign(body, {
+      endpoint: $("st-endpoint").value, bucket: $("st-bucket").value,
+      access_key: $("st-ak").value, secret_key: $("st-sk").value,
+      region: $("st-region").value || "us-east-1", path_style: true,
+    });
+    if (k === "webdav" || k === "openlist") Object.assign(body, {
+      endpoint: $("st-endpoint").value, username: $("st-user").value, password: $("st-pass").value,
+    });
+    if (k === "openlist") body.base_path = $("st-base").value || "/heartshard";
+    try {
+      await api("/api/admin/storage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      toast("Storage 已添加");
+      route();
+    } catch (e) { toast(e.message, true); }
+  };
+}
+window.verifyStorage = async (id) => {
+  try {
+    const results = await api("/api/admin/storage/verify", { method: "POST" });
+    const r = results.find((x) => x.id === id);
+    if (!r) return;
+    r.ok ? toast(`「${id}」连通正常`) : toast(`「${id}」连通失败：${r.error || "?"}`, true);
+  } catch (e) { toast(e.message, true); }
+};
+window.delStorage = (id) => {
+  uiConfirm("删除 Storage", `删除「${id}」？\n\n已有分片数据不会被删除，但该 Storage 将不再参与上传和体检。`, async () => {
+    await api(`/api/admin/storage/${id}`, { method: "DELETE" });
+    toast("已删除");
+    route();
+  }, true);
 };
 
 // ---------------- 管理：系统状态 ----------------

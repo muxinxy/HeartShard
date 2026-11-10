@@ -10,6 +10,8 @@ name = "heartshard-server"
 path = "src/main.rs"
 
 [dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+mysql_async = { version = "0.34", default-features = false, features = ["minimal-rust"], optional = true }
 heart-core = { path = "../core-rs/crates/heart-core" }
 crypto = { path = "../core-rs/crates/crypto" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -25,6 +27,9 @@ hex = "0.4"
 base64 = "0.22"
 getrandom = "0.2"
 sha2 = "0.10"
+
+[features]
+mysql = ["dep:mysql_async"]
 
 [dev-dependencies]
 tempfile = "3"

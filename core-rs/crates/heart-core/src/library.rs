@@ -1392,6 +1392,20 @@ impl HeartCore {
         })
     }
 
+    /// 存储探针：对指定 Storage put/get/delete 一个小对象，验证连通性与凭据。
+    pub fn sync_probe(&self, id: &str) -> Result<(), LibError> {
+        let store = self.store_by_id(id)?;
+        let probe_key = format!("heartshard-probe/{}.probe", hex::encode(generate_iv()?));
+        let payload = b"heartshard probe".to_vec();
+        store.put(&probe_key, &payload)?;
+        let read_back = store.get(&probe_key);
+        let _ = store.delete(&probe_key);
+        match read_back {
+            Some(data) if data == payload => Ok(()),
+            _ => Err(LibError::Data(format!("storage {id} 探针读回失败"))),
+        }
+    }
+
     /// 数据目录（syncer 清单等伴生文件存放用；M2 起供外部工具读取）。
     pub fn data_dir(&self) -> &Path {
         &self.data_dir

@@ -5,6 +5,7 @@
 //! 最高权限）；无任何设置 → none（admin 恒为 manage）。
 
 use crate::auth::User;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -46,50 +47,33 @@ pub struct AclEntry {
 }
 
 pub struct AclStore {
-    pub entries: Vec<AclEntry>,
-    path: std::path::PathBuf,
+    meta: Arc<dyn crate::meta::MetaStore>,
 }
 
 impl AclStore {
-    pub fn load(root: &Path) -> Self {
-        let path = root.join("acls.json");
-        let entries: Vec<AclEntry> =
-            std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { entries, path }
+    pub fn new(meta: Arc<dyn crate::meta::MetaStore>) -> Self {
+        Self { meta }
     }
 
-    pub fn save(&self) -> Result<(), String> {
-        let json = serde_json::to_vec_pretty(&self.entries).map_err(|e| e.to_string())?;
-        let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, &json).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
+    fn all(&self) -> Vec<AclEntry> {
+        self.meta.list_acls().unwrap_or_default()
     }
 
-    pub fn set(&mut self, album_id: &str, principal: Principal, perm: Perm) -> Result<(), String> {
-        self.entries.retain(|e| {
-            !(e.album_id == album_id
-                && e.principal.kind == principal.kind
-                && e.principal.id == principal.id)
-        });
-        self.entries.push(AclEntry {
+    pub fn set(&self, album_id: &str, principal: Principal, perm: Perm) -> Result<(), String> {
+        self.meta.upsert_acl(&AclEntry {
             album_id: album_id.to_string(),
             principal,
             perm,
-        });
-        self.save()
+        })
     }
 
-    pub fn unset(&mut self, album_id: &str, principal: &Principal) -> Result<(), String> {
-        self.entries.retain(|e| {
-            !(e.album_id == album_id
-                && e.principal.kind == principal.kind
-                && e.principal.id == principal.id)
-        });
-        self.save()
+    pub fn unset(&self, album_id: &str, principal: &Principal) -> Result<(), String> {
+        self.meta
+            .delete_acl(album_id, &principal.kind, &principal.id)
     }
 
-    pub fn for_album(&self, album_id: &str) -> Vec<&AclEntry> {
-        self.entries.iter().filter(|e| e.album_id == album_id).collect()
+    pub fn for_album(&self, album_id: &str) -> Vec<AclEntry> {
+        self.all().into_iter().filter(|e| e.album_id == album_id).collect()
     }
 
     /// 用户在某相册节点的显式权限：**用户显式优先**；否则组取最高（组用于放权）。

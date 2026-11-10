@@ -1,5 +1,5 @@
-//! 管理后台 API（M5a）：用户/组/同步源的网页端管理，配置全部运行时化
-//! （users.json / groups.json / sources.json），server.toml 仅负责引导。
+//! 管理后台 API（M5a→M5b''）：用户/组/同步源的网页端管理，配置全部存元数据库
+//! （sqlite 默认 / mysql 可选），server.toml 仅负责引导。
 
 use crate::api::{auth, err, s_err};
 use crate::auth::Group;
@@ -35,8 +35,10 @@ pub async fn list_users(State(state): State<Arc<AppState>>, headers: HeaderMap) 
     if let Err(e) = require_admin(&state, &headers) {
         return e;
     }
-    let users = state.users.lock().unwrap().users.clone();
-    Json(users).into_response()
+    match state.users.list_users() {
+        Ok(users) => Json(users).into_response(),
+        Err(e) => s_err(e),
+    }
 }
 
 pub async fn create_user(
@@ -47,7 +49,7 @@ pub async fn create_user(
     if let Err(e) = require_admin(&state, &headers) {
         return e;
     }
-    match state.users.lock().unwrap().add_user(&req.name, &req.password, req.admin) {
+    match state.users.add_user(&req.name, &req.password, req.admin) {
         Ok(u) => Json(u).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
@@ -71,19 +73,14 @@ pub async fn update_user(
     if let Err(e) = require_admin(&state, &headers) {
         return e;
     }
-    match state
-        .users
-        .lock()
-        .unwrap()
-        .update_user(
-            &uid,
-            req.password.as_deref(),
-            req.name.as_deref(),
-            req.admin,
-            req.enabled,
-            req.avatar.as_deref(),
-        )
-    {
+    match state.users.update_user(
+        &uid,
+        req.password.as_deref(),
+        req.name.as_deref(),
+        req.admin,
+        req.enabled,
+        req.avatar.as_deref(),
+    ) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
@@ -97,7 +94,7 @@ pub async fn delete_user(
     if let Err(e) = require_admin(&state, &headers) {
         return e;
     }
-    match state.users.lock().unwrap().remove_user(&uid) {
+    match state.users.remove_user(&uid) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
@@ -109,8 +106,10 @@ pub async fn list_groups(State(state): State<Arc<AppState>>, headers: HeaderMap)
     if let Err(e) = require_admin(&state, &headers) {
         return e;
     }
-    let groups = state.users.lock().unwrap().groups.clone();
-    Json(groups).into_response()
+    match state.users.list_groups() {
+        Ok(groups) => Json(groups).into_response(),
+        Err(e) => s_err(e),
+    }
 }
 
 #[derive(Deserialize)]
@@ -127,8 +126,7 @@ pub async fn set_groups(
     if let Err(e) = require_admin(&state, &headers) {
         return e;
     }
-    // family 组保留（全员组由启动时重建，这里允许编辑其他组）
-    match state.users.lock().unwrap().set_groups(req.groups) {
+    match state.users.set_groups(req.groups) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => s_err(e),
     }
@@ -161,27 +159,15 @@ pub async fn set_sources(
             return err(StatusCode::BAD_REQUEST, format!("未知源类型: {}", s.kind));
         }
     }
-    *state.sources.lock().unwrap() = sources;
-    if let Err(e) = save_sources(&state) {
+    let json_values: Vec<serde_json::Value> = sources
+        .iter()
+        .map(|s| serde_json::to_value(s).unwrap_or_default())
+        .collect();
+    if let Err(e) = state.users.meta_handle().save_sources(&json_values) {
         return s_err(e);
     }
+    *state.sources.lock().unwrap() = sources;
     StatusCode::OK.into_response()
-}
-
-pub fn load_sources(root: &std::path::Path) -> Vec<syncer::SourceConfig> {
-    std::fs::read(root.join("sources.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
-}
-
-pub(crate) fn save_sources(state: &AppState) -> Result<(), String> {
-    let json = serde_json::to_vec_pretty(&state.sources.lock().unwrap().clone())
-        .map_err(|e| e.to_string())?;
-    let path = state.server_root.join("sources.json");
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, &json).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 // ---------------- 状态总览 ----------------
@@ -195,12 +181,13 @@ pub async fn status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
     let trash = core.list_trashed().map(|b| b.len()).unwrap_or(0);
     let albums = core.list_albums().map(|a| a.len()).unwrap_or(0);
     drop(core);
-    let users_store = state.users.lock().unwrap();
+    let users = state.users.list_users().unwrap_or_default();
+    let groups = state.users.list_groups().unwrap_or_default();
     Json(serde_json::json!({
-        "users": users_store.users.len(),
-        "groups": users_store.groups.len(),
+        "users": users.len(),
+        "groups": groups.len(),
         "sources": state.sources.lock().unwrap().len(),
-        "shares": state.shares.lock().unwrap().shares.len(),
+        "shares": state.shares.all().len(),
         "albums": albums,
         "blobs": blobs,
         "trash": trash,

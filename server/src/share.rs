@@ -61,32 +61,28 @@ fn default_kind() -> String {
 }
 
 pub struct ShareStore {
-    pub shares: Vec<Share>,
-    path: std::path::PathBuf,
+    meta: Arc<dyn crate::meta::MetaStore>,
 }
 
 impl ShareStore {
-    pub fn load(root: &std::path::Path) -> Self {
-        let path = root.join("shares.json");
-        let shares: Vec<Share> =
-            std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { shares, path }
+    pub fn new(meta: Arc<dyn crate::meta::MetaStore>) -> Self {
+        Self { meta }
     }
 
-    pub fn save(&self) -> Result<(), String> {
-        let json = serde_json::to_vec_pretty(&self.shares).map_err(|e| e.to_string())?;
-        let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, &json).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, self.path.clone()).map_err(|e| e.to_string())
+    pub fn all(&self) -> Vec<Share> {
+        self.meta.list_shares().unwrap_or_default()
     }
 
-    pub fn get(&self, id: &str) -> Option<&Share> {
-        self.shares.iter().find(|s| s.id == id)
+    pub fn get(&self, id: &str) -> Option<Share> {
+        self.all().into_iter().find(|s| s.id == id)
     }
 
-    pub fn remove(&mut self, id: &str) -> Result<(), String> {
-        self.shares.retain(|s| s.id != id);
-        self.save()
+    pub fn push(&self, share: Share) -> Result<(), String> {
+        self.meta.save_share(&share)
+    }
+
+    pub fn remove(&self, id: &str) -> Result<(), String> {
+        self.meta.delete_share(id)
     }
 }
 
@@ -274,8 +270,8 @@ fn require_manage_on_blobs(
 ) -> Result<(), Response> {
     let core = state.core.lock().unwrap();
     let parents = crate::api::parent_map_pub(&core)?;
-    let groups = state.users.lock().unwrap().groups_of(&user.uid);
-    let acl = state.acl.lock().unwrap();
+    let groups = state.users.groups_of(&user.uid);
+    let acl = &state.acl;
     for h in hashes {
         let mut allowed = user.is_admin;
         if !allowed {
@@ -310,8 +306,8 @@ pub async fn create_album_share(
             Ok(p) => p,
             Err(e) => return e,
         };
-        let groups = state.users.lock().unwrap().groups_of(&user.uid);
-        if state.acl.lock().unwrap().effective(&user, &groups, &album_id, &parents) < Perm::Manage {
+        let groups = state.users.groups_of(&user.uid);
+        if state.acl.effective(&user, &groups, &album_id, &parents) < Perm::Manage {
             return err(StatusCode::FORBIDDEN, "无权分享该相册");
         }
         let albums = match core.list_albums() {
@@ -348,8 +344,7 @@ pub async fn create_album_share(
         Ok(v) => v,
         Err(e) => return e,
     };
-    state.shares.lock().unwrap().shares.push(share.clone());
-    if let Err(e) = state.shares.lock().unwrap().save() {
+    if let Err(e) = state.shares.push(share.clone()) {
         return s_err(e);
     }
     Json(serde_json::json!({ "share_id": share.id, "url": format!("/s/{}", share.id) })).into_response()
@@ -404,8 +399,7 @@ pub async fn create_blobs_share(
         Ok(v) => v,
         Err(e) => return e,
     };
-    state.shares.lock().unwrap().shares.push(share.clone());
-    if let Err(e) = state.shares.lock().unwrap().save() {
+    if let Err(e) = state.shares.push(share.clone()) {
         return s_err(e);
     }
     Json(serde_json::json!({ "share_id": share.id, "url": format!("/s/{}", share.id) })).into_response()
@@ -423,7 +417,7 @@ fn first_album_of(state: &AppState, hashes: &[String]) -> Option<String> {
 
 /// GET /s/{share_id} — 查看器页面。
 pub async fn share_page(State(state): State<Arc<AppState>>, AxumPathT(id): AxumPathT<String>) -> Response {
-    let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
+    let Some(share) = state.shares.get(&id) else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
@@ -438,7 +432,7 @@ pub async fn share_meta(
     AxumPathT(id): AxumPathT<String>,
     Query(code): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
+    let Some(share) = state.shares.get(&id) else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
@@ -464,7 +458,7 @@ pub async fn share_keys(
     AxumPathT(id): AxumPathT<String>,
     Query(code): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
+    let Some(share) = state.shares.get(&id) else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
@@ -491,7 +485,7 @@ pub async fn share_pkg(
     Query(code): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     let (id, hash) = path;
-    let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
+    let Some(share) = state.shares.get(&id) else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     if let Err(e) = check_expired(&share) {
@@ -527,7 +521,7 @@ pub async fn delete_share(
         Ok(u) => u,
         Err(e) => return e,
     };
-    let Some(share) = state.shares.lock().unwrap().get(&id).cloned() else {
+    let Some(share) = state.shares.get(&id) else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
     let core = state.core.lock().unwrap();
@@ -536,13 +530,13 @@ pub async fn delete_share(
         Err(e) => return e,
     };
     drop(core);
-    let groups = state.users.lock().unwrap().groups_of(&user.uid);
+    let groups = state.users.groups_of(&user.uid);
     if !user.is_admin
-        && state.acl.lock().unwrap().effective(&user, &groups, &share.album_id, &parents) < Perm::Manage
+        && state.acl.effective(&user, &groups, &share.album_id, &parents) < Perm::Manage
     {
         return err(StatusCode::FORBIDDEN, "无权删除该分享");
     }
-    if let Err(e) = state.shares.lock().unwrap().remove(&id) {
+    if let Err(e) = state.shares.remove(&id) {
         return s_err(e);
     }
     StatusCode::OK.into_response()
@@ -555,7 +549,7 @@ pub async fn list_shares(State(state): State<Arc<AppState>>, headers: axum::http
         Err(e) => return e,
     };
     let shares: Vec<Share> = if user.is_admin {
-        state.shares.lock().unwrap().shares.clone()
+        state.shares.all()
     } else {
         let core = state.core.lock().unwrap();
         let parents = match crate::api::parent_map_pub(&core) {
@@ -563,16 +557,13 @@ pub async fn list_shares(State(state): State<Arc<AppState>>, headers: axum::http
             Err(e) => return e,
         };
         drop(core);
-        let groups = state.users.lock().unwrap().groups_of(&user.uid);
-        let acl = state.acl.lock().unwrap();
+        let groups = state.users.groups_of(&user.uid);
+        let acl = &state.acl;
         state
             .shares
-            .lock()
-            .unwrap()
-            .shares
-            .iter()
+            .all()
+            .into_iter()
             .filter(|s| acl.effective(&user, &groups, &s.album_id, &parents) >= Perm::Manage)
-            .cloned()
             .collect()
     };
     Json(shares).into_response()

@@ -49,17 +49,20 @@ fn build_app(
         groups: vec![],
         sources: sources.clone(),
         sync_interval_secs: 0,
+        database: Default::default(),
     };
-    let users = UserStore::init(root, &cfg).unwrap();
-    let acl = AclStore::load(root);
-    let shares = heartshard_server::share::ShareStore::load(root);
+    let meta_store = heartshard_server::meta::SqliteMeta::open(&root.join("meta.db")).unwrap();
+    let meta_store: Arc<dyn heartshard_server::meta::MetaStore> = Arc::new(meta_store);
+    let users = UserStore::init(meta_store.clone(), &cfg).unwrap();
+    let acl = AclStore::new(meta_store.clone());
+    let shares = heartshard_server::share::ShareStore::new(meta_store.clone());
     let state = Arc::new(AppState {
         core: Mutex::new(core),
-        users: Mutex::new(users),
-        acl: Mutex::new(acl),
+        users,
+        acl,
         cfg,
         server_root: root.to_path_buf(),
-        shares: Mutex::new(shares),
+        shares,
         sources: Mutex::new(sources),
     });
     api::router().with_state(state)

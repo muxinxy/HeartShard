@@ -5,7 +5,7 @@
 //! ```
 
 use heart_core::library::HeartCore;
-use heartshard_server::{acl, admin, api, auth::UserStore, config::ServerConfig, share, AppState};
+use heartshard_server::{acl, admin, api, auth::UserStore, config::ServerConfig, meta, share, AppState};
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -45,34 +45,49 @@ fn main() {
         std::process::exit(2);
     }
 
-    let users = match UserStore::init(&server_root, &cfg) {
+    // 元数据库（sqlite 默认 / mysql 可选），JSON 文件一次性迁移
+    let meta_store = match meta::open_meta(&cfg, &server_root) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("错误：{e}");
+            std::process::exit(2);
+        }
+    };
+    let users = match UserStore::init(meta_store.clone(), &cfg) {
         Ok(u) => u,
         Err(e) => {
             eprintln!("错误：{e}");
             std::process::exit(2);
         }
     };
-    let acl_store = acl::AclStore::load(&server_root);
-    let shares = share::ShareStore::load(&server_root);
-    // 同步源运行时化：sources.json 优先；无文件时从 server.toml 迁移（写回文件）
-    let sources = if server_root.join("sources.json").exists() {
-        admin::load_sources(&server_root)
-    } else {
-        let s = cfg.sources.clone();
-        let _ = std::fs::write(
-            server_root.join("sources.json"),
-            serde_json::to_vec_pretty(&s).unwrap_or_default(),
-        );
-        s
-    };
+    let acl_store = acl::AclStore::new(meta_store.clone());
+    let shares = share::ShareStore::new(meta_store.clone());
+    // 同步源：数据库优先；空且 server.toml 有源则迁移写入
+    let mut sources_db = meta_store.list_sources().unwrap_or_default();
+    if sources_db.is_empty() && !cfg.sources.is_empty() {
+        sources_db = cfg
+            .sources
+            .iter()
+            .map(|s| serde_json::to_value(s).unwrap_or_default())
+            .collect();
+        let _ = meta_store.save_sources(&sources_db);
+        eprintln!("[meta] server.toml sources -> 数据库（{} 个源）", sources_db.len());
+    }
+    let mut sources_runtime: Vec<syncer::SourceConfig> = sources_db
+        .iter()
+        .filter_map(|v| serde_json::from_value(v.clone()).ok())
+        .collect();
+    if sources_runtime.is_empty() {
+        sources_runtime = cfg.sources.clone();
+    }
     let state = Arc::new(AppState {
         core: Mutex::new(core),
-        users: Mutex::new(users),
-        acl: Mutex::new(acl_store),
+        users,
+        acl: acl_store,
         cfg: cfg.clone(),
         server_root,
-        shares: Mutex::new(shares),
-        sources: Mutex::new(sources),
+        shares,
+        sources: Mutex::new(sources_runtime),
     });
 
     let rt = tokio::runtime::Builder::new_multi_thread()

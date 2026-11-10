@@ -5,22 +5,31 @@ pub mod admin;
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod meta;
 pub mod share;
+pub mod storage;
 
 use heart_core::library::HeartCore;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub struct AppState {
     pub core: Mutex<HeartCore>,
-    pub users: Mutex<auth::UserStore>,
-    pub acl: Mutex<acl::AclStore>,
+    pub users: auth::UserStore,
+    pub acl: acl::AclStore,
     pub cfg: config::ServerConfig,
-    /// server.toml 所在目录（users.json / shares.json / share_cache 根）
+    /// server.toml 所在目录（share_cache 根）
     pub server_root: PathBuf,
-    pub shares: Mutex<share::ShareStore>,
-    /// 同步源（运行时管理：sources.json，admin API 热更新）
+    pub shares: share::ShareStore,
+    /// 同步源（运行时管理，存元数据库，admin API 热更新）
     pub sources: Mutex<Vec<syncer::SourceConfig>>,
+}
+
+impl AppState {
+    /// 元数据库句柄（admin API 写入用）。
+    pub fn meta(&self) -> Arc<dyn meta::MetaStore> {
+        self.users.meta_handle()
+    }
 }
 
 impl AppState {

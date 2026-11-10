@@ -30,6 +30,18 @@ pub struct ServerConfig {
     /// 同步轮询间隔（秒；0 = 不自动同步，仅手动触发）
     #[serde(default = "default_sync_interval")]
     pub sync_interval_secs: u64,
+    /// 元数据存储（users/groups/acls/shares/sources）
+    #[serde(default)]
+    pub database: DatabaseConfig,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct DatabaseConfig {
+    /// sqlite（默认）| mysql
+    #[serde(default)]
+    pub driver: Option<String>,
+    /// mysql 连接串（mysql://user:pass@host:3306/db）；sqlite 忽略
+    pub url: Option<String>,
 }
 
 fn default_port() -> u16 {

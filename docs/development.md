@@ -322,6 +322,24 @@ HEIC 解码为最大风险项）。
 - `server/build.rs`：编译期对 `app.js`/`sw.js` 跑 `node --check`——前端语法错误
   在编译期拦截（M5a 曾因模板字符串少闭合导致整个 PWA 脚本失效）。
 
+### 7.6.4 M5b'：存储网页配置 + 元数据落库（2026-11-11）
+
+**存储管理网页端**：侧边栏「💾 存储管理」（admin）——列表/添加（本地/S3/WebDAV/
+OpenList）/删除/连通性探针（`HeartCore::sync_probe`：put/get/delete 探针对象）。
+配置经 HeartCore 加密注册表落盘，凭据不落后台明文。
+
+**元数据存数据库**（不再使用 users/groups/acls/shares/sources.json）：
+
+- `server/src/meta.rs`：`MetaStore` trait + **SQLite 实现**（默认，`meta.db`，
+  rusqlite bundled）+ **MySQL 实现**（`--features mysql`，server.toml
+  `[database] driver="mysql" url="mysql://…"`）。表：meta_users/meta_groups/
+  meta_acls/meta_shares/meta_sources（JSON 列存 serde 记录，主键查询）。
+- 首次启动自动把旧 JSON 文件一次性迁移入库（原文件改名 `.migrated` 保留）；
+  server.toml 的 sources 首次自动写入数据库。
+- UserStore/AclStore/ShareStore 全部改为读库-改-写回（sessions 仍内存）。
+- 每请求 HTTP 日志（`[http] METHOD path -> status (ms)`）+ 上传绑定日志 +
+  前端 console.debug api 日志——排障用。
+
 ## 8. 构建/发布（产物）
 
 ### 8.1 Windows（便携 exe，不构建安装程序）
