@@ -534,6 +534,7 @@ function photoCell(b) {
   cell.className = "cell" + (selected.has(b.blob_hash) ? " sel" : "");
   cell.innerHTML = `
     <span class="check" data-hash="${b.blob_hash}">✓</span>
+    ${b.is_motion ? `<span class="motion-badge" title="动态照片">🎞</span>` : ""}
     <span class="name">${b.favorite ? "♥ " : ""}${b.file_name}</span>`;
   if (b.mime.startsWith("image/")) {
     const img = new Image();
@@ -623,12 +624,34 @@ function openViewer(b) {
   lbCurrent = b;
   lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1, ox: 0, oy: 0 };
   lbTransform();
-  $("lb-title").textContent = b.file_name;
+  $("lb-title").textContent = (b.is_motion ? "🎞 " : "") + b.file_name;
   $("lb-fav").textContent = b.favorite ? "♥ 已收藏" : "♡ 收藏";
   // 操作按钮与多选条一致：收藏/重命名/分享/详情/下载/回收站
   $("lb-rename").style.display = "inline-block";
   $("lb-download").style.display = "inline-block";
   const url = `/api/blobs/${b.blob_hash}/raw?token=${encodeURIComponent(token)}`;
+  // M5c 动态照片：「播放动态」按钮切换到配对视频段
+  const oldMotionBtn = document.getElementById("lb-motion");
+  if (oldMotionBtn) oldMotionBtn.remove();
+  const oldOverlay = document.getElementById("lb-motion-overlay");
+  if (oldOverlay) oldOverlay.remove();
+  if (b.is_motion && b.motion_video_hash) {
+    const btn = document.createElement("button");
+    btn.id = "lb-motion";
+    btn.textContent = "▶ 播放动态";
+    btn.onclick = () => {
+      let ov = document.getElementById("lb-motion-overlay");
+      if (ov) { ov.remove(); return; }
+      ov = document.createElement("div");
+      ov.id = "lb-motion-overlay";
+      ov.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,.92);display:grid;place-items:center;z-index:5";
+      ov.innerHTML = `<video controls autoplay style="max-width:96%;max-height:96%;border-radius:8px" src="/api/blobs/${b.motion_video_hash}/raw?token=${encodeURIComponent(token)}"></video>
+        <button style="position:absolute;top:16px;right:20px;background:none;border:1px solid #444;color:#ddd;padding:8px 14px;border-radius:8px;cursor:pointer" onclick="document.getElementById('lb-motion-overlay').remove()">✕ 返回照片</button>`;
+      ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+      $("lb-stage").appendChild(ov);
+    };
+    $("lb-bar").appendChild(btn);
+  }
   if (b.mime.startsWith("video/")) {
     // 视频用 <video> 在线播放（解密字节流直接喂给 video 元素）
     lbImg.style.display = "none";
@@ -766,6 +789,7 @@ async function viewExplore() {
     const key = `${b.gps_lat.toFixed(1)}, ${b.gps_lon.toFixed(1)}`;
     (places.get(key) || places.set(key, []).get(key)).push(b);
   }
+  const motions = all.filter((b) => b.is_motion);
   const placeList = [...places.entries()].sort((a, b) => b[1].length - a[1].length);
   const v = $("view");
   const card = (dataAttr, icon, label, cnt) => `
@@ -780,7 +804,7 @@ async function viewExplore() {
       ${card('data-kind="recent"', "🆕", "最近添加", recent.length)}
       ${card('data-kind="photo"', "🖼", "照片", photos.length)}
       ${card('data-kind="video"', "🎬", "视频", videos.length)}
-      ${card('data-kind="motion"', "🎞", "动态照片", "即将支持")}
+      ${card('data-kind="motion"', "🎞", "动态照片", motions.length)}
       ${card('data-kind="orphan"', "📦", "未入相册", orphans.length)}
     </div>
     <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）</h3>
@@ -792,7 +816,8 @@ async function viewExplore() {
   v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("🆕 最近添加", recent);
   v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("🖼 照片", (b) => b.mime.startsWith("image/"));
   v.querySelector('[data-kind="video"]').onclick = () => openFiltered("🎬 视频", (b) => b.mime.startsWith("video/"));
-  v.querySelector('[data-kind="motion"]').onclick = () => toast("动态照片检测将在后续版本上线（M5c）");
+  v.querySelector('[data-kind="motion"]').onclick = () => openFiltered("🎞 动态照片", motions);
+  v.querySelector('[data-kind="orphan"]').onclick = () => openFiltered("📦 未入相册", orphans);
   v.querySelector('[data-kind="orphan"]').onclick = () => openFiltered("📦 未入相册", orphans);
   v.querySelectorAll("[data-place]").forEach((c) => {
     c.onclick = () => openFiltered(`📍 ${c.dataset.place}`, places.get(c.dataset.place) || []);

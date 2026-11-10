@@ -353,6 +353,24 @@ OpenList）/删除/连通性探针（`HeartCore::sync_probe`：put/get/delete �
 新增 Tauri 命令：`export_bytes_to_file`（后台原图另存）、`save_remote_preview`
 （后台原图→临时文件→系统预览）、`read_local_file`（拖拽路径→multipart 上传）。
 
+### 7.8 M5c：动态照片（2026-11-11）
+
+`core-rs/crates/heart-core/src/motion.rs`：
+
+- **Android 动态照片**：JPEG XMP GCamera 标记（`MicroVideo`/`MotionPhoto`）+
+  尾部 `ftyp`（isom/mp42/MSNV = MP4，`qt  ` = MOV）→ 提取尾随视频段。
+  检测是纯字节操作（`detect_jpeg_motion` / `extract_motion_video`）。
+- **Apple Live Photo**：v1 文件名配对（`IMG_1234.HEIC` ↔ `IMG_1234.MOV`，
+  `find_live_photo_pair`）；ContentIdentifier 深度解析后续版本。
+- **导入管线**：JPEG 检测为动态照片 → 尾随视频段自动切分为**独立 blob**
+  （完整加密分片+manifest+索引）→ 主图回填 `is_motion`/`motion_video_hash`；
+  视频段打墓碑隐藏（不进时间线/相册），由主图关联取用播放。
+- **索引**：`BlobRecord.is_motion`/`motion_video_hash`（serde default + schema
+  ALTER TABLE 迁移，旧库自动补列）。
+- **UI**：桌面灯箱「▶ 播放动态」（heartshard-video:// 播放配对视频段）、
+  导出时双文件（主图+`-motion.mp4`）；网页端照片格子 🎞 徽标、灯箱「播放动态」、
+  探索页「🎞 动态照片」分类。
+
 ## 8. 构建/发布（产物）
 
 ### 8.1 Windows（便携 exe，不构建安装程序）

@@ -230,6 +230,17 @@ export function Gallery({ onLock }: { onLock: () => void }) {
       if (!dest) return;
       await api.exportBlob(blob.blob_hash, dest);
       toast.success(`已还原并通过 SHA-256 校验：${dest}`);
+      // M5c 动态照片：同时导出配对视频段（双文件）
+      if (blob.is_motion && blob.motion_video_hash) {
+        const dot = dest.lastIndexOf(".");
+        const videoDest = dot >= 0 ? `${dest.slice(0, dot)}-motion.mp4` : `${dest}-motion.mp4`;
+        try {
+          await api.exportBlob(blob.motion_video_hash, videoDest);
+          toast.success(`动态视频已一并导出：${videoDest}`);
+        } catch (e) {
+          toast.error(`动态视频导出失败：${String(e)}`);
+        }
+      }
     } catch (e) {
       setError(`导出失败：${String(e)}`);
     }

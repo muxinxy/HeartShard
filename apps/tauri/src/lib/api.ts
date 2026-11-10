@@ -27,6 +27,10 @@ export interface BlobEntry {
   gps_lat: number | null;
   gps_lon: number | null;
   favorite: boolean;
+  /** 动态照片主图（Android motion / Apple Live Photo） */
+  is_motion?: boolean;
+  /** 配对视频段 blob hash（动态照片） */
+  motion_video_hash?: string;
 }
 
 export interface VerifyReport {
@@ -579,6 +583,8 @@ export interface ApiProvider {
   thumbnailUrl(hash: string): Promise<string>;
   largeUrl(hash: string): Promise<string>;
   rawUrl(hash: string): Promise<string>;
+  /** 动态照片配对视频段的播放 URL */
+  motionVideoUrl(hash: string): Promise<string>;
   blobDetail(blobHash: string): Promise<BlobDetail>;
   verifyAll(): Promise<VerifyReport[]>;
   importHistory(): Promise<string[]>;
@@ -640,9 +646,23 @@ const localMissing = {
 
 export const api: ApiProvider = (() => {
   if (currentMode() === "remote") {
-    return { ...remoteApi, ...remoteMissing, thumbnail: (h: string) => remoteApi.thumbnailUrl(h), thumbnailLarge: (h: string) => remoteApi.largeUrl(h) } as ApiProvider;
+    return {
+      ...remoteApi,
+      ...remoteMissing,
+      thumbnail: (h: string) => remoteApi.thumbnailUrl(h),
+      thumbnailLarge: (h: string) => remoteApi.largeUrl(h),
+      motionVideoUrl: async (h: string) => remoteBlobUrl(h, "raw"),
+    } as ApiProvider;
   }
-  return { ...localApi, ...localMissing, thumbnailUrl: (h: string) => localApi.thumbnail(h), largeUrl: (h: string) => localApi.thumbnailLarge(h), rawUrl: (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`), uploadFiles: async () => { throw new Error("本地模式请使用「导入照片 / 视频」按钮"); } } as ApiProvider;
+  return {
+    ...localApi,
+    ...localMissing,
+    thumbnailUrl: (h: string) => localApi.thumbnail(h),
+    largeUrl: (h: string) => localApi.thumbnailLarge(h),
+    rawUrl: (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),
+    motionVideoUrl: async (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),
+    uploadFiles: async () => { throw new Error("本地模式请使用「导入照片 / 视频」按钮"); },
+  } as ApiProvider;
 })();
 
 // 能力开关：组件按此隐藏本地专属入口

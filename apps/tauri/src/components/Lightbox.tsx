@@ -23,6 +23,7 @@ export function Lightbox({
 }) {
   const blob = blobs[index];
   const [src, setSrc] = useState<string | null>(null);
+  const [playingMotion, setPlayingMotion] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [off, setOff] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
@@ -33,6 +34,7 @@ export function Lightbox({
     setSrc(null);
     setZoom(1);
     setOff({ x: 0, y: 0 });
+    setPlayingMotion(false);
     if (blob.mime.startsWith("image/")) {
       api
         .thumbnailLarge(blob.blob_hash)
@@ -144,6 +146,36 @@ export function Lightbox({
           />
         ) : (
           <p className="hint">加载中…</p>
+        )}
+        {/* M5c 动态照片：照片上叠加「播放动态」按钮切换到配对视频段 */}
+        {blob.is_motion && blob.motion_video_hash && (
+          <button
+            className="lb-motion-play"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPlayingMotion(true);
+            }}
+          >
+            ▶ 播放动态
+          </button>
+        )}
+        {playingMotion && blob.motion_video_hash && (
+          <div
+            className="lb-motion-overlay"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPlayingMotion(false);
+            }}
+          >
+            <video
+              controls
+              autoPlay
+              src={`heartshard-video://localhost/${blob.motion_video_hash}`}
+            />
+            <button className="lb-motion-close" onClick={() => setPlayingMotion(false)}>
+              ✕ 返回照片
+            </button>
+          </div>
         )}
       </div>
 
