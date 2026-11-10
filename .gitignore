@@ -22,6 +22,8 @@ server/groups.json
 server/acls.json
 server/shares.json
 server/share_cache/
+server/meta.db
+server/meta.db-*
 
 # node
 node_modules/
