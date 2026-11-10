@@ -340,6 +340,19 @@ OpenList）/删除/连通性探针（`HeartCore::sync_probe`：put/get/delete �
 - 每请求 HTTP 日志（`[http] METHOD path -> status (ms)`）+ 上传绑定日志 +
   前端 console.debug api 日志——排障用。
 
+### 7.7 M5b：桌面客户端双模式（2026-11-11）
+
+桌面客户端同时支持两种数据源（`apps/tauri/src/lib/api.ts`）：
+
+- **本地相册库**（原 M1 行为）：Tauri invoke，Argon2id 解锁，全部功能可用
+- **连接后台**：`RemoteProvider` fetch 牧心后台 REST API（token 会话）；
+  存储管理/导入向导/再平衡/体检等分片技术入口按 `platform` 开关隐藏
+  （这些操作在后台网页管理页做）
+
+锁屏新增「本地相册库 / 连接后台」切换；后台模式 = 地址 + 用户名 + 口令登录。
+新增 Tauri 命令：`export_bytes_to_file`（后台原图另存）、`save_remote_preview`
+（后台原图→临时文件→系统预览）、`read_local_file`（拖拽路径→multipart 上传）。
+
 ## 8. 构建/发布（产物）
 
 ### 8.1 Windows（便携 exe，不构建安装程序）

@@ -94,6 +94,9 @@ pub fn run() {
             commands::purge_blob,
             commands::list_trashed,
             commands::open_path_system,
+            commands::export_bytes_to_file,
+            commands::save_remote_preview,
+            commands::read_local_file,
             commands::export_blob_range,
             commands::thumbnail_large,
         ])

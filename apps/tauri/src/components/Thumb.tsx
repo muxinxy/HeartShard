@@ -27,7 +27,7 @@ export function Thumb({ blobHash, mime }: { blobHash: string; mime: string }) {
     if (!visible) return;
     let cancelled = false;
     api
-      .thumbnail(blobHash)
+      .thumbnailUrl(blobHash)
       .then((s) => {
         if (!cancelled) setSrc(s);
       })

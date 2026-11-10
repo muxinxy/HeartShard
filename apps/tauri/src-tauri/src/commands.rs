@@ -1,6 +1,7 @@
 //! Tauri 命令层：把 `library.rs` 的业务函数暴露给前端。
 //! 错误统一转 String（M1）；会话状态在 `SessionState`（Mutex 持 HeartCore）。
 
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -446,6 +447,27 @@ pub fn preview_blob(
 pub struct PreviewResult {
     pub path: String,
     pub mime: String,
+}
+
+/// 后台模式：把远程下载的字节写入用户选择的文件（导出/另存）。
+#[tauri::command]
+pub fn export_bytes_to_file(bytes: Vec<u8>, dest_path: String) -> Result<(), String> {
+    fs::write(&dest_path, &bytes).map_err(|e| format!("写入失败: {e}"))
+}
+
+/// 后台模式：把远程原图写入临时文件（系统预览用），返回路径。
+#[tauri::command]
+pub fn save_remote_preview(bytes: Vec<u8>, blob_hash: String) -> Result<String, String> {
+    let hash = blob_hash.get(0..12).unwrap_or("preview");
+    let tmp = std::env::temp_dir().join(format!("heartshard-preview-{hash}.bin"));
+    fs::write(&tmp, &bytes).map_err(|e| format!("写入失败: {e}"))?;
+    Ok(tmp.to_string_lossy().to_string())
+}
+
+/// 后台模式：读取本地文件字节（拖拽导入路径 → multipart 上传前的中转）。
+#[tauri::command]
+pub fn read_local_file(path: String) -> Result<Vec<u8>, String> {
+    fs::read(&path).map_err(|e| format!("读取失败: {e}"))
 }
 
 /// 构造数据目录：便携模式 → exe 同目录 data/（无 app_data_dir 依赖）。

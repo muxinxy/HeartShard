@@ -31,12 +31,20 @@ fn main() {
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    // 解锁共享库
+    // 解锁共享库：环境变量口令；未设置时交互输入
     let password = match std::env::var(&cfg.library.password_env) {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("错误：环境变量 {} 未设置（库解锁口令）", cfg.library.password_env);
-            std::process::exit(2);
+            eprint!("口令（解锁相册库 {}）：", cfg.library.dir);
+            use std::io::BufRead;
+            let mut line = String::new();
+            match std::io::stdin().lock().read_line(&mut line) {
+                Ok(_) => line.trim().to_string(),
+                Err(e) => {
+                    eprintln!("错误：读取口令失败：{e}");
+                    std::process::exit(2);
+                }
+            }
         }
     };
     let mut core = HeartCore::new(&cfg.library.dir);

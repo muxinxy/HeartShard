@@ -11,6 +11,7 @@ import { Virtuoso, VirtuosoGrid } from "react-virtuoso";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   api,
+  platform,
   AlbumInfo,
   BlobEntry,
   formatBytes,
@@ -584,7 +585,7 @@ export function Gallery({ onLock }: { onLock: () => void }) {
           <button className="primary-btn" onClick={doImport} disabled={importing}>
             {importing ? "导入中…" : "导入照片 / 视频"}
           </button>
-          <button onClick={() => setWizardOpen(true)}>导入目录</button>
+          {platform.canImportWizard && <button onClick={() => setWizardOpen(true)}>导入目录</button>}
           <button onClick={() => setAlbumTreeOpen(true)}>相册管理</button>
           <button onClick={() => setMapOpen(true)}>地图</button>
           <button onClick={() => setSettingsOpen(true)}>设置</button>
@@ -595,15 +596,23 @@ export function Gallery({ onLock }: { onLock: () => void }) {
                 <button onClick={() => { setMenuOpen(false); doSync(); }} disabled={syncing}>
                   同步多设备
                 </button>
-                <button onClick={() => { setMenuOpen(false); doRebalance(); }} disabled={syncing}>
-                  再平衡分片
-                </button>
-                <button onClick={() => { setMenuOpen(false); doHealthCheck(); }} disabled={healthChecking}>
-                  {healthChecking ? "体检中…" : "一键体检"}
-                </button>
+                {platform.canRebalance && (
+                  <button onClick={() => { setMenuOpen(false); doRebalance(); }} disabled={syncing}>
+                    再平衡分片
+                  </button>
+                )}
+                {platform.canVerify && (
+                  <button onClick={() => { setMenuOpen(false); doHealthCheck(); }} disabled={healthChecking}>
+                    {healthChecking ? "体检中…" : "一键体检"}
+                  </button>
+                )}
                 <button onClick={() => { setMenuOpen(false); setTrashOpen(true); }}>回收站</button>
-                <button onClick={() => { setMenuOpen(false); setStorageOpen(true); }}>存储管理</button>
-                <button onClick={() => { setMenuOpen(false); openHistory(); }}>导入历史</button>
+                {platform.canStorageManage && (
+                  <button onClick={() => { setMenuOpen(false); setStorageOpen(true); }}>存储管理</button>
+                )}
+                {platform.canImportWizard && (
+                  <button onClick={() => { setMenuOpen(false); openHistory(); }}>导入历史</button>
+                )}
                 <button onClick={() => { setMenuOpen(false); refresh(); }}>刷新</button>
               </div>
             )}
