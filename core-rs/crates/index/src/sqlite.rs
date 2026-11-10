@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS blobs(
   created_at INTEGER NOT NULL,
   deleted_at INTEGER,
   favorite INTEGER NOT NULL DEFAULT 0,
+  is_motion INTEGER NOT NULL DEFAULT 0,
+  motion_video_hash TEXT NOT NULL DEFAULT '',
   sync_lamport INTEGER NOT NULL DEFAULT 0,
   sync_device TEXT NOT NULL DEFAULT ''
 );
@@ -139,14 +141,17 @@ impl IndexDb {
 
     pub fn init_schema(&self) -> Result<(), IndexError> {
         self.conn.execute_batch(SCHEMA)?;
-        // 旧库迁移：favorite 列（已有库 CREATE TABLE IF NOT EXISTS 不会补列）
-        if let Err(e) = self.conn.execute(
+        // 旧库迁移（已有库 CREATE TABLE IF NOT EXISTS 不会补列）
+        for sql in [
             "ALTER TABLE blobs ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
-            [],
-        ) {
-            let msg = e.to_string();
-            if !msg.contains("duplicate column") {
-                return Err(e.into());
+            "ALTER TABLE blobs ADD COLUMN is_motion INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE blobs ADD COLUMN motion_video_hash TEXT NOT NULL DEFAULT ''",
+        ] {
+            if let Err(e) = self.conn.execute(sql, []) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(e.into());
+                }
             }
         }
         Ok(())
@@ -285,12 +290,13 @@ impl IndexDb {
         };
         if outcome == MergeOutcome::TookRemote {
             self.conn.execute(
-                "INSERT INTO blobs(hash,file_name,size,mime,width,height,gps_lat,gps_lon,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,favorite,sync_lamport,sync_device)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+                "INSERT INTO blobs(hash,file_name,size,mime,width,height,gps_lat,gps_lon,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,favorite,is_motion,motion_video_hash,sync_lamport,sync_device)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
                  ON CONFLICT(hash) DO UPDATE SET
                    file_name=?2, size=?3, mime=?4, width=?5, height=?6, gps_lat=?7, gps_lon=?8,
                    taken_at=?9, chunk_size=?10, n=?11, m=?12, manifest_storage_key=?13,
-                   created_at=?14, deleted_at=?15, favorite=?16, sync_lamport=?17, sync_device=?18",
+                   created_at=?14, deleted_at=?15, favorite=?16, is_motion=?17, motion_video_hash=?18,
+                   sync_lamport=?19, sync_device=?20",
                 params![
                     r.hash,
                     r.file_name,
@@ -308,6 +314,8 @@ impl IndexDb {
                     r.created_at,
                     r.deleted_at,
                     r.favorite,
+                    r.is_motion,
+                    r.motion_video_hash,
                     v.lamport as i64,
                     v.device_id,
                 ],
@@ -318,12 +326,12 @@ impl IndexDb {
 
     pub fn load_blobs(&self) -> Result<Vec<Versioned<BlobRecord>>, IndexError> {
         let mut stmt = self.conn.prepare(
-            "SELECT hash,file_name,size,mime,width,height,gps_lat,gps_lon,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,favorite,sync_lamport,sync_device FROM blobs",
+            "SELECT hash,file_name,size,mime,width,height,gps_lat,gps_lon,taken_at,chunk_size,n,m,manifest_storage_key,created_at,deleted_at,favorite,is_motion,motion_video_hash,sync_lamport,sync_device FROM blobs",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Versioned {
-                lamport: row.get::<_, i64>(16)?.max(0) as u64,
-                device_id: row.get(17)?,
+                lamport: row.get::<_, i64>(18)?.max(0) as u64,
+                device_id: row.get(19)?,
                 record: BlobRecord {
                     hash: row.get(0)?,
                     file_name: row.get(1)?,
@@ -341,6 +349,8 @@ impl IndexDb {
                     created_at: row.get(13)?,
                     deleted_at: row.get(14)?,
                     favorite: row.get::<_, i64>(15)? != 0,
+                    is_motion: row.get::<_, i64>(16)? != 0,
+                    motion_video_hash: row.get(17)?,
                 },
             })
         })?;

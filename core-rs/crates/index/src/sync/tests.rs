@@ -23,6 +23,8 @@ fn blob(hash: String, name_suffix: &str) -> BlobRecord {
         created_at: 1,
         deleted_at: None,
         favorite: false,
+        is_motion: false,
+        motion_video_hash: String::new(),
     }
 }
 

@@ -86,6 +86,8 @@ mod tests {
                     created_at: 1,
                     deleted_at: None,
                     favorite: false,
+                    is_motion: false,
+                    motion_video_hash: String::new(),
                 },
             }],
             albums: vec![Versioned {

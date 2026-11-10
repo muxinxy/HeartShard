@@ -38,6 +38,12 @@ pub struct BlobRecord {
     /// 收藏（♥）；旧设备同步来的 JSON 无此字段时默认 false。
     #[serde(default)]
     pub favorite: bool,
+    /// 动态照片主图（Android motion photo / Apple Live Photo 配对主图）。
+    #[serde(default)]
+    pub is_motion: bool,
+    /// 配对视频段的 blob hash（动态照片）；非动态照片为空串。
+    #[serde(default)]
+    pub motion_video_hash: String,
 }
 
 /// 相册。`id` 为生成 uuid（字符串），跨设备稳定。

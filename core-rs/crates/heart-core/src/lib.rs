@@ -9,6 +9,7 @@
 //! service_plugin.rs）留在 apps/tauri/src-tauri。
 
 pub mod library;
+pub mod motion;
 pub mod storage_ftp;
 pub mod storage_openlist;
 pub mod storage_s3;

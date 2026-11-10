@@ -512,6 +512,7 @@ dependencies = [
  "sha2",
  "shard",
  "suppaftp",
+ "tempfile",
  "thiserror",
  "webpki-roots 0.26.11",
  "zeroize",

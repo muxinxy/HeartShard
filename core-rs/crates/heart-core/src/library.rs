@@ -87,6 +87,10 @@ pub struct BlobEntry {
     pub gps_lon: Option<f64>,
     /// 收藏（♥）
     pub favorite: bool,
+    /// 动态照片主图（Android motion / Apple Live Photo）
+    pub is_motion: bool,
+    /// 配对视频段 blob hash（动态照片；非动态照片为空串）
+    pub motion_video_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -674,6 +678,8 @@ impl HeartCore {
                 created_at: manifest.created_at,
                 deleted_at: None,
                 favorite: false,
+                is_motion: false,
+                motion_video_hash: String::new(),
             },
         })?;
         db.set_lamport(lamport)?;
@@ -686,6 +692,7 @@ impl HeartCore {
             .load_blobs()?
             .into_iter()
             .filter(|v| v.record.deleted_at.is_none())
+            // 动态照片视频段已打墓碑（主图关联取用），这里不需要再过滤
             .map(|v| BlobEntry {
                 blob_hash: v.record.hash,
                 file_name: v.record.file_name,
@@ -695,6 +702,8 @@ impl HeartCore {
                 gps_lat: v.record.gps_lat,
                 gps_lon: v.record.gps_lon,
                 favorite: v.record.favorite,
+                is_motion: v.record.is_motion,
+                motion_video_hash: v.record.motion_video_hash.clone(),
             })
             .collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
@@ -1003,6 +1012,8 @@ impl HeartCore {
                 gps_lat: v.record.gps_lat,
                 gps_lon: v.record.gps_lon,
                 favorite: v.record.favorite,
+                is_motion: v.record.is_motion,
+                motion_video_hash: v.record.motion_video_hash.clone(),
             })
             .collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
@@ -1180,6 +1191,8 @@ impl HeartCore {
                 gps_lat: v.record.gps_lat,
                 gps_lon: v.record.gps_lon,
                 favorite: v.record.favorite,
+                is_motion: v.record.is_motion,
+                motion_video_hash: v.record.motion_video_hash.clone(),
             })
             .collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
@@ -1404,6 +1417,148 @@ impl HeartCore {
             Some(data) if data == payload => Ok(()),
             _ => Err(LibError::Data(format!("storage {id} 探针读回失败"))),
         }
+    }
+
+    /// 动态照片尾随视频段入库：独立 blob（正常加密分片管线）+ manifest + 索引记录。
+    /// 返回视频 blob hash。
+    fn import_motion_video_segment(
+        &self,
+        db: &index::sqlite::IndexDb,
+        me: &str,
+        main_blob_hex: &str,
+        main_rel_path: &str,
+        video_bytes: &[u8],
+        fmt: &str,
+    ) -> Result<String, LibError> {
+        let keys = self.keys_or_err()?;
+        let video_sha = crypto::sha256(video_bytes);
+        let video_hex = hex::encode(video_sha);
+        // 同 hash 已存在则跳过编码（幂等）
+        let already = db.load_blobs()?.iter().any(|v| v.record.hash == video_hex);
+        if !already {
+            let blob_key = keys.blob_key(&video_sha)?;
+            let encoded = shard::encode_blob(
+                video_bytes,
+                &blob_key,
+                self.settings.chunk_size,
+                self.settings.n,
+                self.settings.m,
+                generate_iv,
+            )?;
+            for s in &encoded.shards {
+                let store = self.storages[usize::from(s.shard_index) % self.storages.len()].store()?;
+                store.put(&s.object_key, &s.data)?;
+            }
+            // manifest
+            let file_name = format!(
+                "{}-motion.{}",
+                main_rel_path.rsplit('/').next().unwrap_or("motion").rsplit('.').next().unwrap_or("video"),
+                fmt
+            );
+            let manifest = Manifest {
+                version: 1,
+                codec: CODEC_ID.into(),
+                blob_sha256: hex::encode(encoded.blob_sha256),
+                total_len: video_bytes.len() as u64,
+                chunk_size: self.settings.chunk_size as u32,
+                n: self.settings.n,
+                m: self.settings.m,
+                created_at: now_secs(),
+                file_name,
+                mime: if fmt == "mov" { "video/quicktime".into() } else { "video/mp4".into() },
+                chunks: encoded
+                    .chunks
+                    .iter()
+                    .map(|c| ManifestChunk {
+                        plaintext_sha256: hex::encode(c.plaintext_sha256),
+                        ciphertext_len: c.ciphertext.len() as u32,
+                    })
+                    .collect(),
+                shards: encoded
+                    .shards
+                    .iter()
+                    .map(|s| ManifestShard {
+                        chunk_index: s.chunk_index,
+                        shard_index: s.shard_index,
+                        storage_id: self.storages[usize::from(s.shard_index) % self.storages.len()].id(),
+                        remote_key: s.object_key.clone(),
+                        size: s.data.len() as u32,
+                        sha256: hex::encode(s.sha256),
+                    })
+                    .collect(),
+            };
+            self.save_manifest(&video_hex, &manifest)?;
+            // 索引记录（视频本体）
+            let lamport = db.lamport()? + 1;
+            db.upsert_blob(&Versioned {
+                lamport,
+                device_id: me.to_string(),
+                record: BlobRecord {
+                    hash: video_hex.clone(),
+                    file_name: manifest.file_name.clone(),
+                    size: video_bytes.len() as i64,
+                    mime: manifest.mime.clone(),
+                    width: 0,
+                    height: 0,
+                    taken_at: now_secs(),
+                    gps_lat: None,
+                    gps_lon: None,
+                    chunk_size: self.settings.chunk_size as i64,
+                    n: self.settings.n as i64,
+                    m: self.settings.m as i64,
+                    manifest_storage_key: manifest_object_key(&video_hex)?,
+                    created_at: manifest.created_at,
+                    deleted_at: None,
+                    favorite: false,
+                    is_motion: false,
+                    motion_video_hash: String::new(),
+                },
+            })?;
+        }
+        // 主图 → 视频段不进相册/时间线（它是主图的附件）：打视频墓碑隐藏
+        // （但 blob 保留可解密；主图经 motion_video_hash 关联取回播放）
+        Ok(video_hex)
+    }
+
+    /// 主图回填动态照片标记（is_motion + motion_video_hash）。
+    fn mark_blob_as_motion(
+        &self,
+        db: &index::sqlite::IndexDb,
+        main_blob_hex: &str,
+        video_hash: &str,
+    ) -> Result<(), LibError> {
+        let me = db.device_id()?;
+        let existing = db
+            .load_blobs()?
+            .into_iter()
+            .find(|v| v.record.hash == main_blob_hex)
+            .ok_or_else(|| LibError::Data("motion main blob not found".into()))?;
+        let lamport = db.lamport()? + 1;
+        let mut record = existing.record.clone();
+        record.is_motion = true;
+        record.motion_video_hash = video_hash.to_string();
+        // 视频段隐藏：单独墓碑（不进时间线/相册，由主图关联取用）
+        db.upsert_blob(&Versioned {
+            lamport,
+            device_id: me.clone(),
+            record,
+        })?;
+        // 给视频段打墓碑（保留 blob 可解密）
+        if let Some(v) = db
+            .load_blobs()?
+            .into_iter()
+            .find(|v| v.record.hash == video_hash && v.record.deleted_at.is_none())
+        {
+            let lamport2 = db.lamport()? + 1;
+            let mut rec = v.record.clone();
+            rec.deleted_at = Some(now_secs());
+            db.upsert_blob(&Versioned {
+                lamport: lamport2,
+                device_id: me,
+                record: rec,
+            })?;
+        }
+        Ok(())
     }
 
     /// 数据目录（syncer 清单等伴生文件存放用；M2 起供外部工具读取）。
@@ -2328,7 +2483,7 @@ impl HeartCore {
         let mut consecutive_failures = 0usize;
         let mut inflight: Vec<(
             index::sqlite::StagingRow,
-            std::thread::JoinHandle<Result<(shard::EncodedBlob, Option<Vec<u8>>, ExifData), String>>,
+            std::thread::JoinHandle<Result<(shard::EncodedBlob, Option<Vec<u8>>, ExifData, Option<Vec<u8>>, &'static str), String>>,
         )> = Vec::new();
         let concurrency = opts.concurrency.max(1).min(8);
 
@@ -2357,8 +2512,8 @@ impl HeartCore {
                     self.storages.iter().map(|s| s.store()).collect::<Result<Vec<_>, _>>()?;
                 let blob_sha: [u8; 32] = decode_hash(&row.sha256)?;
                 let abs_path = PathBuf::from(&row.abs_path);
-                let handle = std::thread::spawn(move || -> Result<(shard::EncodedBlob, Option<Vec<u8>>, ExifData), String> {
-                    // 返回 3 元组：(编码结果, 缩略图, EXIF)
+                let handle = std::thread::spawn(move || -> Result<(shard::EncodedBlob, Option<Vec<u8>>, ExifData, Option<Vec<u8>>, &'static str), String> {
+                    // 返回 5 元组：(编码结果, 缩略图, EXIF, 动态照片视频段, 视频格式)
                     let bytes = read_file_retry(&abs_path)?;
                     // §11：图片文件顺手生成缩略图 PNG（懒加载 + 加密缓存用）
                     let thumb = if mime_of(&abs_path).starts_with("image/") {
@@ -2371,6 +2526,20 @@ impl HeartCore {
                         parse_exif_from_bytes(&bytes)
                     } else {
                         ExifData::default()
+                    };
+                    // M5c 动态照片检测（仅 JPEG）
+                    let (motion_video, motion_fmt) = if mime_of(&abs_path) == "image/jpeg" {
+                        let info = crate::motion::detect_jpeg_motion(&bytes);
+                        if info.is_motion {
+                            match crate::motion::extract_motion_video(&bytes, &info) {
+                                Some(v) => (Some(v), info.video_format),
+                                None => (None, "mp4"),
+                            }
+                        } else {
+                            (None, "mp4")
+                        }
+                    } else {
+                        (None, "mp4")
                     };
                     let blob_key = keys.blob_key(&blob_sha).map_err(|e| e.to_string())?;
                     let encoded = encode_blob(
@@ -2386,7 +2555,7 @@ impl HeartCore {
                         let store = &stores[usize::from(s.shard_index) % stores.len()];
                         store.put(&s.object_key, &s.data).map_err(|e| e.to_string())?;
                     }
-                    Ok((encoded, thumb, exif_data))
+                    Ok((encoded, thumb, exif_data, motion_video, motion_fmt))
                 });
                 inflight.push((row, handle));
             }
@@ -2399,7 +2568,7 @@ impl HeartCore {
             let size = row.size.max(0) as u64;
             let album_dir = row.rel_path.rsplit_once('/').map(|(d, _)| d.to_string());
             match handle.join() {
-                Ok(Ok((encoded, thumb, exif_data))) => {
+                Ok(Ok((encoded, thumb, exif_data, motion_video, motion_fmt))) => {
                     consecutive_failures = 0;
                     let blob_hex = hex::encode(encoded.blob_sha256);
                     let album_id = album_dir
@@ -2408,6 +2577,26 @@ impl HeartCore {
                     self.finalize_import_file(db, &me, &row, &encoded, &blob_hex, album_id, &exif_data)?;
                     if let Some(png) = thumb {
                         let _ = self.thumbnail_cache_put(&blob_hex, &png);
+                    }
+                    // M5c 动态照片：尾随视频段作为独立 blob 入库并回填关联
+                    if let Some(video_bytes) = motion_video {
+                        match self.import_motion_video_segment(
+                            db,
+                            &me,
+                            &blob_hex,
+                            &file_rel,
+                            &video_bytes,
+                            motion_fmt,
+                        ) {
+                            Ok(video_hash) => {
+                                let _ = db.set_lamport(db.lamport()?);
+                                // 回填主图 is_motion + motion_video_hash
+                                self.mark_blob_as_motion(db, &blob_hex, &video_hash)?;
+                            }
+                            Err(e) => {
+                                eprintln!("[motion] 视频段入库失败 {file_rel}: {e}");
+                            }
+                        }
                     }
                     report.imported += 1;
                 }
@@ -2520,6 +2709,8 @@ impl HeartCore {
                 created_at: manifest.created_at,
                 deleted_at: None,
                 favorite: false,
+                is_motion: false,
+                motion_video_hash: String::new(),
             },
         })?;
         db.set_lamport(lamport)?;
