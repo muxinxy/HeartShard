@@ -1,3 +1,2 @@
-[31;1mSelect-String: [31;1mCannot find path 'D:\Documents\Code\HeartShard\crates\shard\src\lib.rs' because it does not exist.[0m
-[31;1mpub: [31;1mThe term 'pub' is not recognized as a name of a cmdlet, function, script file, or executable program.[0m
+[31;1mOut-Node: [31;1mThe term 'Out-Node' is not recognized as a name of a cmdlet, function, script file, or executable program.[0m
 [31;1m[31;1mCheck the spelling of the name, or if a path was included, verify that the path is correct and try again.[0m

@@ -593,6 +593,13 @@ impl HeartCore {
             ExifData::default()
         };
 
+        // M5c 动态照片检测（单文件上传路径；目录导入在 worker 里）
+        let motion_info = if mime_of(path) == "image/jpeg" {
+            crate::motion::detect_jpeg_motion(&blob)
+        } else {
+            Default::default()
+        };
+
         // 去重（§8.4）
         if db.load_blobs()?.iter().any(|v| v.record.hash == blob_hex) {
             return Ok((blob_hex, true));
@@ -658,8 +665,51 @@ impl HeartCore {
         }
 
         // 写加密索引（跨设备同步的元数据）
+        // M5c 动态照片：尾随视频段作为独立 blob 入库并回填主图标记
+        let (is_motion, motion_video_hash) = if motion_info.is_motion {
+            match crate::motion::extract_motion_video(&blob, &motion_info) {
+                Some(video_bytes) => {
+                    let db2 = db;
+                    match self.import_motion_video_segment(
+                        db2,
+                        &me,
+                        &blob_hex,
+                        &file_name_of(path),
+                        &video_bytes,
+                        motion_info.video_format,
+                    ) {
+                        Ok(video_hash) => {
+                            // 视频段墓碑（不进时间线，主图关联取用）
+                            if let Some(v) = db
+                                .load_blobs()?
+                                .into_iter()
+                                .find(|v| v.record.hash == video_hash && v.record.deleted_at.is_none())
+                            {
+                                let lamport_v = db.lamport()? + 1;
+                                let mut rec = v.record.clone();
+                                rec.deleted_at = Some(now_secs());
+                                db.upsert_blob(&Versioned {
+                                    lamport: lamport_v,
+                                    device_id: me.clone(),
+                                    record: rec,
+                                })?;
+                            }
+                            (true, video_hash)
+                        }
+                        Err(e) => {
+                            eprintln!("[motion] 视频段入库失败 {}: {e}", file_name_of(path));
+                            (false, String::new())
+                        }
+                    }
+                }
+                None => (false, String::new()),
+            }
+        } else {
+            (false, String::new())
+        };
+        let me = me; // 保持借用顺序
         db.upsert_blob(&Versioned {
-            lamport,
+            lamport: lamport + if is_motion { 1 } else { 0 },
             device_id: me,
             record: BlobRecord {
                 hash: blob_hex.clone(),
@@ -678,8 +728,8 @@ impl HeartCore {
                 created_at: manifest.created_at,
                 deleted_at: None,
                 favorite: false,
-                is_motion: false,
-                motion_video_hash: String::new(),
+                is_motion,
+                motion_video_hash,
             },
         })?;
         db.set_lamport(lamport)?;

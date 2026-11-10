@@ -13,7 +13,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# scripts/ 在仓库根下，仓库根 = 脚本目录的父目录
+$repoRoot = Split-Path -Parent $PSScriptRoot
 $tauriDir = Join-Path $repoRoot "apps\tauri"
 $genDir = Join-Path $tauriDir "src-tauri\gen\android"
 $assetsDir = Join-Path $genDir "app\src\main\assets"
