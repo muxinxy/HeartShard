@@ -29,10 +29,12 @@ function toast(msg, isErr = false) {
 async function api(path, opts = {}) {
   const headers = opts.headers || {};
   if (token) headers["authorization"] = `Bearer ${token}`;
+  console.debug("[api]", opts.method || "GET", path);
   const res = await fetch(path, { ...opts, headers });
   if (res.status === 401) { showLogin(); throw new Error("登录已过期"); }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    console.warn("[api 失败]", opts.method || "GET", path, res.status, body);
     throw new Error(body.error || res.statusText);
   }
   const ct = res.headers.get("content-type") || "";
@@ -457,7 +459,12 @@ function renderPhotoGrid() {
       }
       const header = document.createElement("div");
       header.className = "day-header";
-      if (g.date && !document.querySelector(`[data-anchor="${g.date.getFullYear()}"]`)) header.setAttribute("data-anchor", g.date.getFullYear());
+      if (g.date) {
+        const y = g.date.getFullYear();
+        const m = g.date.getMonth() + 1;
+        if (!document.querySelector(`[data-anchor-y="${y}"]`)) header.setAttribute("data-anchor-y", y);
+        if (!document.querySelector(`[data-anchor-m="${y}-${m}"]`)) header.setAttribute("data-anchor-m", `${y}-${m}`);
+      }
       // 当天全选/取消全选
       const allIn = g.items.every((b) => selected.has(b.blob_hash));
       header.innerHTML = `<label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
@@ -486,20 +493,40 @@ function renderPhotoGrid() {
     }
   });
   io.observe(sentinel);
-  // 年份锚点
-  const years = [...new Set(list.filter((b) => b.taken_at).map((b) => new Date(b.taken_at * 1000).getFullYear()))].sort((a, b) => b - a);
-  $("years").innerHTML = years.map((y) => `<div data-year="${y}">${y}</div>`).join("");
-  document.querySelectorAll("#years div").forEach((el) => {
-    el.onclick = () => document.querySelector(`[data-anchor="${el.dataset.year}"]`)?.scrollIntoView({ behavior: "smooth" });
-  });
+  // 时间轴（年+月，右侧）
+  buildYearsRail(list, "#view");
 }
 function toggleDay(group, checked) {
   for (const b of group.items) {
     checked ? selected.add(b.blob_hash) : selected.delete(b.blob_hash);
   }
   renderSelbar();
-  // 更新该天勾选状态（不整页重渲染，保留滚动位置）
-  renderPhotoGrid();
+  updateDayChecks();
+}
+// 年份+月份时间轴（右侧栏；锚点由日头上的 data-anchor-y / data-anchor-m 提供）
+function buildYearsRail(list, scopeSel) {
+  const byYear = new Map();
+  for (const b of list) {
+    if (!b.taken_at) continue;
+    const d = new Date(b.taken_at * 1000);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    (byYear.get(y) || byYear.set(y, new Map()).get(y)).set(m, true);
+  }
+  const years = [...byYear.keys()].sort((a, b) => b - a);
+  $("years").innerHTML = years
+    .map((y) => {
+      const months = [...byYear.get(y).keys()].sort((a, b) => b - a);
+      return `<div class="rail-year" data-year="${y}">${y}</div>` +
+        months.map((m) => `<div class="rail-month" data-ym="${y}-${m}">${m}月</div>`).join("");
+    })
+    .join("");
+  document.querySelectorAll("#years .rail-year").forEach((el) => {
+    el.onclick = () => document.querySelector(`${scopeSel} [data-anchor-y="${el.dataset.year}"]`)?.scrollIntoView({ behavior: "smooth" });
+  });
+  document.querySelectorAll("#years .rail-month").forEach((el) => {
+    el.onclick = () => document.querySelector(`${scopeSel} [data-anchor-m="${el.dataset.ym}"]`)?.scrollIntoView({ behavior: "smooth" });
+  });
 }
 function photoCell(b) {
   const cell = document.createElement("div");
@@ -784,12 +811,8 @@ function openFiltered(title, predOrItems) {
   const groups = groupByDay(list);
   currentGroups = groups;
   if (list.length === 0) { body.innerHTML = `<p class="hint">没有内容。</p>`; return; }
-  // 年份锚点（右侧时间轴，与时间线一致）
-  const years = [...new Set(list.filter((b) => b.taken_at).map((b) => new Date(b.taken_at * 1000).getFullYear()))].sort((a, b) => b - a);
-  $("years").innerHTML = years.map((y) => `<div data-year="${y}">${y}</div>`).join("");
-  document.querySelectorAll("#years div").forEach((el) => {
-    el.onclick = () => document.querySelector(`#filtered-body [data-anchor="${el.dataset.year}"]`)?.scrollIntoView({ behavior: "smooth" });
-  });
+  // 时间轴（年+月，与时间线一致）
+  buildYearsRail(list, "#filtered-body");
   for (const g of groups) {
     if (g.type === "sep") {
       body.insertAdjacentHTML("beforeend", `<div class="day-header" style="color:var(--primary)">—— ${g.label} ——</div>`);
@@ -797,7 +820,12 @@ function openFiltered(title, predOrItems) {
     }
     const header = document.createElement("div");
     header.className = "day-header";
-    if (g.date && !document.querySelector(`#filtered-body [data-anchor="${g.date.getFullYear()}"]`)) header.setAttribute("data-anchor", g.date.getFullYear());
+    if (g.date) {
+      const y = g.date.getFullYear();
+      const m = g.date.getMonth() + 1;
+      if (!document.querySelector(`#filtered-body [data-anchor-y="${y}"]`)) header.setAttribute("data-anchor-y", y);
+      if (!document.querySelector(`#filtered-body [data-anchor-m="${y}-${m}"]`)) header.setAttribute("data-anchor-m", `${y}-${m}`);
+    }
     header.textContent = `${g.label} · ${g.items.length} 张`;
     body.appendChild(header);
     const grid = document.createElement("div");
@@ -805,7 +833,6 @@ function openFiltered(title, predOrItems) {
     for (const b of g.items) grid.appendChild(photoCell(b));
     body.appendChild(grid);
   }
-  $("back-explore").onclick = () => { location.hash = "#/explore"; route(); };
 }
 
 // ---------------- 收藏夹 ----------------

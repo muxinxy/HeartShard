@@ -57,6 +57,7 @@ pub fn parent_map_pub(core: &HeartCore) -> Result<HashMap<String, Option<String>
 }
 
 /// token 查询参数桥接：`?token=xxx` → Authorization 头（img/video 标签无法带头）。
+/// 同时输出请求日志（方法/路径/状态/耗时），方便调试。
 pub async fn token_query_bridge(
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -73,7 +74,18 @@ pub async fn token_query_bridge(
             }
         }
     }
-    next.run(axum::extract::Request::from_parts(parts, body)).await
+    let method = parts.method.clone();
+    let path = parts.uri.path().to_string();
+    let started = std::time::Instant::now();
+    let res = next.run(axum::extract::Request::from_parts(parts, body)).await;
+    eprintln!(
+        "[http] {} {} -> {} ({}ms)",
+        method,
+        path,
+        res.status(),
+        started.elapsed().as_millis()
+    );
+    res
 }
 
 fn effective(state: &AppState, user: &User, album_id: &str, parents: &HashMap<String, Option<String>>) -> Perm {
@@ -373,6 +385,10 @@ pub async fn upload(
     }
     let tmp = staged.unwrap();
     drop(staged_out);
+    eprintln!(
+        "[upload] file={file_name} album_id={album_id:?} bytes={}",
+        tmp.metadata().map(|m| m.len()).unwrap_or(0)
+    );
 
     // 解密管线是阻塞操作 → spawn_blocking
     let state2 = state.clone();
@@ -384,6 +400,7 @@ pub async fn upload(
         if matches!(outcome.status, ImportStatus::Imported | ImportStatus::SkippedDuplicate) {
             if let Some(h) = &outcome.blob_hash {
                 core.album_add_blob(&album_id2, h).map_err(|e| e.to_string())?;
+                eprintln!("[upload] bound blob {h} -> album {album_id2}");
             }
         }
         Ok::<(String, Option<String>), String>((
