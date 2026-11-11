@@ -1,0 +1,18 @@
+[
+  {
+    "uid": "管理员",
+    "name": "管理员",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$HnLsIpWrhKVb3DGzEpSMUw$4vRfOFDi83YaEUMVrmRzHU49UTCv0p+S4OQUOF/Bwcc",
+    "is_admin": true,
+    "enabled": true,
+    "avatar": ""
+  },
+  {
+    "uid": "mxy",
+    "name": "mxy",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$w6qHmo80UxeLGlowJm3YZw$NzPjQiG3l3Xjx+t+8WG7lAfE8rLjsUr+EzKMwj72GPU",
+    "is_admin": true,
+    "enabled": true,
+    "avatar": ""
+  }
+]

@@ -37,6 +37,7 @@ input, select, textarea { font-size: 14px; padding: 8px 10px; border-radius: 8px
 .sidebar { width: 200px; flex-shrink: 0; background: var(--sidebar-bg); padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar .logo { font-weight: 700; font-size: 17px; padding: 6px 12px 18px; }
 .sidebar a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: var(--fg); text-decoration: none; cursor: pointer; }
+.sidebar .ic { width: 17px; height: 17px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .sidebar a.active { background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); font-weight: 600; }
 .sidebar a:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
 .sidebar .sec { margin: 14px 12px 4px; font-size: 12px; color: var(--muted); }
@@ -151,25 +152,40 @@ html, body { height: 100%; }
   <h1 style="font-size:24px;margin:0 0 4px">牧心相册</h1>
   <p class="hint" style="margin:0 0 16px">家庭加密相册</p>
   <input id="user" placeholder="用户名" autocomplete="username">
-  <input id="pass" type="password" placeholder="口令" autocomplete="current-password">
+  <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
   <button class="primary" id="login-btn">登录</button>
 </div>
 
 <div id="app" class="layout">
+  <!-- 极简线性 SVG 图标 sprite（Lucide 风格 1.5px stroke） -->
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-timeline" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+    <symbol id="i-explore" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-albums" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-shares" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></symbol>
+    <symbol id="i-favorites" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-groups" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+    <symbol id="i-storage" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></symbol>
+    <symbol id="i-status" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  </svg>
   <nav class="sidebar">
     <div class="logo">牧心相册</div>
-    <a data-view="photos" class="active">📅 时间线</a>
-    <a data-view="explore">🔍 探索</a>
-    <a data-view="albums">📁 相册</a>
-    <a data-view="shares">🔗 分享</a>
-    <a data-view="favorites">⭐ 收藏夹</a>
-    <a data-view="trash">🗑 回收站</a>
+    <a data-view="photos" class="active"><svg class="ic"><use href="#i-timeline"/></svg>时间线</a>
+    <a data-view="explore"><svg class="ic"><use href="#i-explore"/></svg>探索</a>
+    <a data-view="albums"><svg class="ic"><use href="#i-albums"/></svg>相册</a>
+    <a data-view="shares"><svg class="ic"><use href="#i-shares"/></svg>分享</a>
+    <a data-view="favorites"><svg class="ic"><use href="#i-favorites"/></svg>收藏夹</a>
+    <a data-view="trash"><svg class="ic"><use href="#i-trash"/></svg>回收站</a>
     <div class="sec" id="admin-sec" style="display:none">管理</div>
-    <a data-view="admin-users" id="nav-admin-users" style="display:none">👥 用户管理</a>
-    <a data-view="admin-groups" id="nav-admin-groups" style="display:none">🏷 用户组</a>
-    <a data-view="admin-sources" id="nav-admin-sources" style="display:none">🔄 同步源</a>
-    <a data-view="admin-storage" id="nav-admin-storage" style="display:none">💾 存储管理</a>
-    <a data-view="admin-status" id="nav-admin-status" style="display:none">📊 系统状态</a>
+    <a data-view="admin-users" id="nav-admin-users" style="display:none"><svg class="ic"><use href="#i-users"/></svg>用户管理</a>
+    <a data-view="admin-groups" id="nav-admin-groups" style="display:none"><svg class="ic"><use href="#i-groups"/></svg>用户组</a>
+    <a data-view="admin-sources" id="nav-admin-sources" style="display:none"><svg class="ic"><use href="#i-sync"/></svg>同步源</a>
+    <a data-view="admin-storage" id="nav-admin-storage" style="display:none"><svg class="ic"><use href="#i-storage"/></svg>存储管理</a>
+    <a data-view="admin-status" id="nav-admin-status" style="display:none"><svg class="ic"><use href="#i-status"/></svg>系统状态</a>
     <div style="flex:1"></div>
   </nav>
   <div class="main">

@@ -20,7 +20,13 @@ use serde::{Deserialize, Serialize};
 pub struct OpenListConfig {
     /// 例如 `http://127.0.0.1:5244`
     pub base_url: String,
+    /// 令牌（OpenList 管理后台「个人资料→令牌」生成；优先于用户名/密码）
+    #[serde(default)]
+    pub token: String,
+    /// 用户名/密码（可选；与 token 二选一，填了则自动登录换 token）
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub password: String,
     /// 挂载的基础目录（如 `/heartshard`），对象键附加在其后。
     pub base_path: String,
@@ -83,10 +89,15 @@ impl OpenListStore {
         self.config.base_url.trim_end_matches('/')
     }
 
-    /// 登录并缓存 token；已缓存则复用。
+    /// 取 token：配置了令牌则直接用；否则用户名/密码登录并缓存。
     fn ensure_token(&self) -> Result<String, StoreError> {
         if let Some(t) = self.token.lock().unwrap().as_ref() {
             return Ok(t.clone());
+        }
+        if !self.config.token.is_empty() {
+            let t = self.config.token.clone();
+            *self.token.lock().unwrap() = Some(t.clone());
+            return Ok(t);
         }
         self.login()
     }

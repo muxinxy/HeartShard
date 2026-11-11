@@ -1,0 +1,28 @@
+# HeartShard 牧心后台编排
+# 首次使用：
+#   1. docker compose up -d
+#   2. docker compose exec server sh -c 'cat /data/meta/server.toml' 确认配置
+#   3. 浏览器 http://localhost:8420
+#
+# 库解锁口令：改 .env 里 HEARTSHARD_LIB_PW 后 `docker compose up -d` 重启生效。
+
+services:
+  server:
+    build: ./server
+    container_name: heartshard-server
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    environment:
+      - HEARTSHARD_LIB_PW=${HEARTSHARD_LIB_PW:?请在 .env 或环境变量中设置相册库口令}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./server.toml:/data/meta/server.toml:ro
+      - heartshard-lib:/data/library
+      - heartshard-meta:/data/meta
+      # 云存储为本地目录时的挂载示例：
+      # - /srv/photos:/photos:ro
+
+volumes:
+  heartshard-lib:
+  heartshard-meta:

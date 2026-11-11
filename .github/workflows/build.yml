@@ -1,0 +1,141 @@
+# HeartShard 多平台多架构编译
+# 产物：
+#   - 服务端：x86_64/aarch64/armv7 (linux-gnu)、x86_64-pc-windows-msvc
+#   - 桌面便携 exe：x86_64-pc-windows-msvc
+#   - Android APK：arm64-v8a / armeabi-v7a / x86_64
+# 触发：push 到 main 或手动（workflow_dispatch）
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  server-linux:
+    name: server (${{ matrix.target }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            cross: true
+          - target: armv7-unknown-linux-gnueabihf
+            cross: true
+          - target: i686-unknown-linux-gnu
+            cross: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+      - name: Build
+        working-directory: server
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+      - name: Prepare
+        run: |
+          mkdir -p dist
+          cp server/target/${{ matrix.target }}/release/heartshard-server dist/heartshard-server-${{ matrix.target }}
+          cp server/server.toml.example dist/server.toml.example
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.target }}
+          path: dist/*
+
+  server-windows:
+    name: server (x86_64-pc-windows-msvc)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build server
+        working-directory: server
+        run: cargo build --release
+      - name: Build desktop portable exe
+        working-directory: apps/tauri
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build
+        env:
+          # CI 无签名需求；跳过 updater
+          TAURI_SIGNING_PRIVATE_KEY: ""
+      - name: Prepare
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item server/target/release/heartshard-server.exe dist/
+          Copy-Item apps/tauri/target/release/heartshard-tauri.exe dist/HeartShard-0.1.0-x64-portable.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  android:
+    name: android (${{ matrix.abi }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+          - abi: armeabi-v7a
+            target: armv7-linux-androideabi
+          - abi: x86_64
+            target: x86_64-linux-android
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Init android project (if absent)
+        working-directory: apps/tauri
+        run: pnpm tauri android init || echo "gen/android 已提交则跳过"
+      - name: Build .so
+        working-directory: apps/tauri
+        run: pnpm tauri android build --target ${{ matrix.target }} || true
+      - name: Sync frontend assets
+        working-directory: apps/tauri
+        shell: pwsh
+        run: |
+          pnpm build
+          New-Item -ItemType Directory -Force -Path src-tauri/gen/android/app/src/main/assets | Out-Null
+          Copy-Item dist/* src-tauri/gen/android/app/src/main/assets -Recurse -Force
+      - name: Copy .so + gradle
+        shell: pwsh
+        run: |
+          $abi = "${{ matrix.abi }}"
+          New-Item -ItemType Directory -Force -Path "src-tauri/gen/android/app/src/main/jniLibs/$abi" | Out-Null
+          $so = Get-ChildItem "src-tauri/target" -Recurse -Filter "libtauri_lib.so" | Where-Object { $_.FullName -match [regex]::Escape("${{ matrix.target }}") } | Select-Object -First 1
+          Copy-Item $so.FullName "src-tauri/gen/android/app/src/main/jniLibs/$abi/libtauri_lib.so" -Force
+          Set-Location src-tauri/gen/android
+          gradlew.bat assemble${(Get-Culture).TextInfo.ToTitleCase($abi.Replace('-',' ').Replace('v8a','V8a').Replace('armeabi','Armeabi')).Replace(' ','')}Release
+        env:
+          HEARTSHARD_SKIP_RUST_TASK: "1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.abi }}
+          path: apps/tauri/src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk

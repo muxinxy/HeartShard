@@ -188,11 +188,11 @@ $("avatar-input").onchange = async () => {
 };
 $("menu-password").onclick = () => {
   uiForm("修改密码", [
-    { id: "pw-old", type: "password", label: "旧口令" },
-    { id: "pw-new", type: "password", label: "新口令" },
-    { id: "pw-new2", type: "password", label: "确认新口令" },
+    { id: "pw-old", type: "password", label: "旧密码" },
+    { id: "pw-new", type: "password", label: "新密码" },
+    { id: "pw-new2", type: "password", label: "确认新密码" },
   ], async (v) => {
-    if (v["pw-new"] !== v["pw-new2"]) { toast("两次新口令不一致", true); return; }
+    if (v["pw-new"] !== v["pw-new2"]) { toast("两次新密码不一致", true); return; }
     await api("/api/me/password", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -219,6 +219,7 @@ window.addEventListener("hashchange", route);
 function route() {
   const view = (location.hash || "#/photos").replace(/^#\//, "");
   if (!token) return;
+  closeModal(); closeCtx(); // 防弹窗残留（分享成功后 route 重绘时清理）
   document.querySelectorAll(".sidebar a[data-view]").forEach((a) => {
     a.classList.toggle("active", a.dataset.view === view);
   });
@@ -966,12 +967,29 @@ async function viewAlbums() {
   $("asel-cancel").onclick = () => { clearSelection(); route(); };
 }
 function shareAlbum(a) {
-  uiConfirm("分享相册", `为「${a.name}」创建分享链接？接收者无需登录即可查看（图片自动去元数据）。`, async () => {
-    const data = await api(`/api/albums/${a.id}/share`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
-    const url = location.origin + data.url;
-    await navigator.clipboard.writeText(url).catch(() => {});
-    toast("分享链接已创建并复制：\n" + url);
-  });
+  modal(`
+    <h3>分享相册「${a.name}」</h3>
+    <p class="hint">接收者无需登录即可查看（图片自动去元数据）。</p>
+    <div class="row" style="margin:8px 0">
+      <label>有效期 <select id="al-share-exp"><option value="">永久</option><option value="1">1 天</option><option value="7">7 天</option><option value="30">30 天</option></select></label>
+      <input id="al-share-code" placeholder="分享码（可选）">
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="primary" id="al-share-go">创建链接</button></div>`);
+  $("al-share-go").onclick = async () => {
+    const exp = $("al-share-exp").value ? Number($("al-share-exp").value) : null;
+    const code = $("al-share-code").value.trim() || null;
+    try {
+      const data = await api(`/api/albums/${a.id}/share`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expires_days: exp, access_code: code }),
+      });
+      const url = location.origin + data.url;
+      await navigator.clipboard.writeText(url + (code ? `（分享码：${code}）` : "")).catch(() => {});
+      closeModal();
+      toast("分享链接已创建并复制：\n" + url);
+    } catch (e) { toast(e.message, true); }
+  };
 }
 window.deleteAlbumDialog = (a) => {
   uiConfirm("删除相册", `删除相册「${a.name}」？\n\n相册一经删除便无法恢复；相册中的照片和视频仍会保留在「全部照片」中。`, async () => {
@@ -1259,7 +1277,7 @@ async function userDialog(existing) {
     </div>
     <label class="hint">显示名</label>
     <input id="ud-name" value="${existing ? existing.name : ""}" style="width:100%;margin:4px 0 10px">
-    ${existing ? `<label class="hint">新口令（留空不改）</label><input id="ud-pass" type="password" style="width:100%;margin:4px 0 10px">` : `<label class="hint">口令</label><input id="ud-pass" type="password" style="width:100%;margin:4px 0 10px">`}
+    ${existing ? `<label class="hint">新密码（留空不改）</label><input id="ud-pass" type="password" style="width:100%;margin:4px 0 10px">` : `<label class="hint">密码</label><input id="ud-pass" type="password" style="width:100%;margin:4px 0 10px">`}
     <div class="row" style="margin:8px 0">
       ${existing ? `<label><input type="checkbox" id="ud-admin" ${existing.is_admin ? "checked" : ""}> 管理员</label>
       <label style="margin-left:16px"><input type="checkbox" id="ud-enabled" ${existing.enabled === false ? "" : "checked"}> 启用</label>` : ""}
@@ -1341,10 +1359,10 @@ window.editUser = (uid) => api("/api/admin/users").then((users) => {
   if (u) userDialog(u);
 });
 window.resetPw = (uid, name) => {
-  uiForm(`重置「${name}」的口令`, [{ id: "rp-pass", type: "password", label: "新口令" }], async (v) => {
+  uiForm(`重置「${name}」的密码`, [{ id: "rp-pass", type: "password", label: "新密码" }], async (v) => {
     await api(`/api/admin/users/${uid}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: v["rp-pass"] }) });
     closeModal();
-    toast("口令已重置");
+    toast("密码已重置");
   });
 };
 window.delUser = (uid, name) => {
@@ -1499,7 +1517,27 @@ async function viewAdminSources() {
       <select id="ns-del"><option value="keep">删除保留</option><option value="trash">删除进回收站</option></select>
       <button class="primary" id="ns-add">添加</button>
     </div>
-    <p class="hint">S3/WebDAV/OpenList 的凭据暂不支持网页端配置（防泄漏），请写在 server.toml 的 sources 段由启动迁移，或参考文档手动编辑 sources.json。</p>`;
+    <div class="form-card" id="ns-creds" style="display:none">
+      <strong>凭据：</strong>
+      <input id="ns-bucket" placeholder="bucket" style="display:none">
+      <input id="ns-user" placeholder="用户名" style="display:none">
+      <input id="ns-pass" placeholder="密码" style="display:none">
+      <input id="ns-token" placeholder="令牌（OpenList 管理后台生成）" style="display:none">
+      <input id="ns-base" placeholder="base_path（默认 /heartshard）" style="display:none">
+    </div>
+    <p class="hint">远端源（S3/WebDAV/OpenList）的凭据经表单提交后由后台加密落库，不会明文展示。</p>`;
+  const credRender = () => {
+    const k = $("ns-kind").value;
+    const show = (id, on) => ($(id).style.display = on ? "inline-block" : "none");
+    show("ns-bucket", k === "s3");
+    show("ns-user", k === "s3" || k === "webdav");
+    show("ns-pass", k === "s3" || k === "webdav");
+    show("ns-token", k === "openlist");
+    show("ns-base", k === "openlist");
+    $("ns-creds").style.display = k === "local" ? "none" : "flex";
+  };
+  $("ns-kind").onchange = credRender;
+  credRender();
   $("ns-add").onclick = async () => {
     const id = $("ns-id").value.trim();
     const kind = $("ns-kind").value;
@@ -1513,9 +1551,16 @@ async function viewAdminSources() {
     if (kind !== "local") {
       const url = $("ns-root").value;
       if (!url) { toast("需要端点 URL 或路径", true); return; }
-      if (kind === "s3") s.s3 = { endpoint: url, bucket: prompt("bucket：") || "", access_key: prompt("access_key：") || "", secret_key: prompt("secret_key：") || "", region: "us-east-1", path_style: true };
-      if (kind === "webdav") s.webdav = { base_url: url, username: prompt("用户名：") || "", password: prompt("密码：") || "" };
-      if (kind === "openlist") s.openlist = { base_url: url, username: prompt("用户名：") || "", password: prompt("密码：") || "", base_path: "/heartshard" };
+      if (kind === "s3") s.s3 = {
+        endpoint: url,
+        bucket: $("ns-bucket").value || "",
+        access_key: $("ns-user").value || "",
+        secret_key: $("ns-pass").value || "",
+        region: "us-east-1",
+        path_style: true,
+      };
+      if (kind === "webdav") s.webdav = { base_url: url, username: $("ns-user").value || "", password: $("ns-pass").value || "" };
+      if (kind === "openlist") s.openlist = { base_url: url, token: $("ns-token").value || "", username: "", password: "", base_path: $("ns-base").value || "/heartshard" };
     }
     const cur = await api("/api/admin/sources");
     cur.push(s);
@@ -1569,7 +1614,7 @@ async function viewAdminStorage() {
       local: "",
       s3: `${f("st-endpoint", "endpoint（https://s3…）")}${f("st-bucket", "bucket")}${f("st-ak", "access_key")}${f("st-sk", "secret_key")}${f("st-region", "region（默认 us-east-1）")}`,
       webdav: `${f("st-endpoint", "base_url（https://dav…）")}${f("st-user", "用户名")}${f("st-pass", "密码")}`,
-      openlist: `${f("st-endpoint", "base_url（http://…:5244）")}${f("st-user", "用户名")}${f("st-pass", "密码")}${f("st-base", "base_path（默认 /heartshard）")}`,
+      openlist: `${f("st-endpoint", "base_url（http://…:5244）")}${f("st-token", "令牌（管理后台→个人资料→令牌）")}${f("st-base", "base_path（默认 /heartshard）")}`,
     }[k];
     $("st-root").style.display = k === "local" ? "inline-block" : "none";
   };
@@ -1583,10 +1628,13 @@ async function viewAdminStorage() {
       access_key: $("st-ak").value, secret_key: $("st-sk").value,
       region: $("st-region").value || "us-east-1", path_style: true,
     });
-    if (k === "webdav" || k === "openlist") Object.assign(body, {
+    if (k === "webdav") Object.assign(body, {
       endpoint: $("st-endpoint").value, username: $("st-user").value, password: $("st-pass").value,
     });
-    if (k === "openlist") body.base_path = $("st-base").value || "/heartshard";
+    if (k === "openlist") {
+      Object.assign(body, { endpoint: $("st-endpoint").value, token: $("st-token").value });
+      body.base_path = $("st-base").value || "/heartshard";
+    }
     try {
       await api("/api/admin/storage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       toast("Storage 已添加");

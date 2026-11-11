@@ -55,6 +55,8 @@ pub enum LibError {
     Ida(#[from] ida::IdaError),
     #[error("请先解锁")]
     Locked,
+    #[error("口令不正确，请重新输入")]
+    WrongPassword,
     #[error("blob {0} 不在索引中")]
     BlobNotFound(String),
     #[error("manifest 缺失或不可读: {0}")]
@@ -366,9 +368,9 @@ impl HeartCore {
         let wrapped = hex::decode(&wrap.wrapped_hex)
             .map_err(|e| LibError::Data(format!("mk wrap corrupt: {e}")))?;
         let payload = decrypt_bare(kek.as_ref(), &wrapped)
-            .map_err(|_| LibError::Data("wrong password (MK unwrap failed)".into()))?;
+            .map_err(|_| LibError::WrongPassword)?;
         if payload.len() != 64 {
-            return Err(LibError::Data("mk wrap payload corrupt".into()));
+            return Err(LibError::Data("主密钥封装文件已损坏".into()));
         }
         let mut mk = Zeroizing::new([0u8; 32]);
         mk.as_mut().copy_from_slice(&payload[..32]);

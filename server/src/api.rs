@@ -120,15 +120,21 @@ pub struct LoginReq {
 
 pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
     match state.users.login(&req.name, &req.password) {
-        Ok((token, user)) => Json(serde_json::json!({
-            "token": token,
-            "uid": user.uid,
-            "name": user.name,
-            "is_admin": user.is_admin,
-            "avatar": user.avatar,
-        }))
-        .into_response(),
-        Err(e) => err(StatusCode::UNAUTHORIZED, e),
+        Ok((token, user)) => {
+            eprintln!("[auth] 登录成功 user={} uid={} admin={}", user.name, user.uid, user.is_admin);
+            Json(serde_json::json!({
+                "token": token,
+                "uid": user.uid,
+                "name": user.name,
+                "is_admin": user.is_admin,
+                "avatar": user.avatar,
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            eprintln!("[auth] 登录失败 user={}: {e}", req.name);
+            err(StatusCode::UNAUTHORIZED, e)
+        }
     }
 }
 
@@ -242,6 +248,7 @@ pub async fn create_album(State(state): S, headers: HeaderMap, Json(req): Json<C
         Ok(id) => id,
         Err(e) => return s_err(e.to_string()),
     };
+    eprintln!("[album] 创建相册 name={} id={} parent={:?}", req.name.trim(), id, req.parent_id);
     // 根相册无父级可继承：显式授予 family 组 manage，否则普通用户永远看不到
     if req.parent_id.is_none() {
         let acl = &state.acl;
@@ -565,7 +572,10 @@ pub async fn delete_blob(State(state): S, headers: HeaderMap, AxumPath(hash): Ax
     }
     let core = state.core.lock().unwrap();
     match core.delete_blob(&hash) {
-        Ok(()) => StatusCode::OK.into_response(),
+        Ok(()) => {
+            eprintln!("[blob] 移入回收站 hash={hash} by={}", user.uid);
+            StatusCode::OK.into_response()
+        }
         Err(e) => s_err(e.to_string()),
     }
 }

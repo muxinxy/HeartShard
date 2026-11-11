@@ -41,6 +41,7 @@ pub struct AddStorageReq {
     pub path_style: Option<bool>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub token: Option<String>,
     pub base_path: Option<String>,
 }
 
@@ -99,6 +100,7 @@ pub async fn add_storage(
             use heart_core::storage_openlist::OpenListConfig;
             core.add_storage_openlist(OpenListConfig {
                 base_url: req.endpoint.clone().unwrap_or_default(),
+                token: req.token.clone().unwrap_or_default(),
                 username: req.username.clone().unwrap_or_default(),
                 password: req.password.clone().unwrap_or_default(),
                 base_path: req.base_path.clone().unwrap_or_else(|| "/heartshard".into()),

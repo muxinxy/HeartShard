@@ -1,0 +1,30 @@
+# 牧心后台容器配置模板：复制到 server/server.toml 或挂载到 /data/meta/server.toml
+port = 8420
+
+[library]
+# 容器内相册库卷（docker-compose 已挂载 heartshard-lib）
+dir = "/data/library"
+# 库解锁口令走环境变量 HEARTSHARD_LIB_PW（见 docker-compose.yml）
+password_env = "HEARTSHARD_LIB_PW"
+
+# 元数据库：默认 SQLite（/data/meta/meta.db）；要切 MySQL 取消注释
+[database]
+driver = "sqlite"
+# driver = "mysql"
+# url = "mysql://heartshard:密码@mysql:3306/heartshard"
+
+# 引导管理员（首次启动创建；之后可在网页端管理）
+[[users]]
+name = "admin"
+password_env = "HEARTSHARD_ADMIN_PW"
+admin = true
+
+# 同步轮询间隔（秒；0 = 仅手动）
+sync_interval_secs = 300
+
+# 同步源示例（也可在网页端「同步源」页配置，保存后入库）
+# [[sources]]
+# id = "photos"
+# kind = "local"
+# root = "/photos"
+# strategy = "append"
