@@ -183,6 +183,7 @@ fn openlist_store_roundtrip_against_mock() {
 
     let store = OpenListStore::new(OpenListConfig {
         base_url: format!("http://{}", mock.addr),
+        token: String::new(),
         username: "admin".into(),
         password: "pw".into(),
         base_path: "/heartshard".into(),
