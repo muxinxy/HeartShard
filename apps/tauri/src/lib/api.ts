@@ -644,26 +644,32 @@ const localMissing = {
   },
 };
 
-export const api: ApiProvider = (() => {
-  if (currentMode() === "remote") {
-    return {
-      ...remoteApi,
-      ...remoteMissing,
-      thumbnail: (h: string) => remoteApi.thumbnailUrl(h),
-      thumbnailLarge: (h: string) => remoteApi.largeUrl(h),
-      motionVideoUrl: async (h: string) => remoteBlobUrl(h, "raw"),
+// 动态分派：LockScreen 切换模式后 setMode 立即生效（api 在模块加载时固化会
+// 导致「连接后台」仍走本地 invoke → MK unwrap failed）。
+export const api: ApiProvider = new Proxy({} as ApiProvider, {
+  get(_t, prop: string) {
+    if (currentMode() === "remote") {
+      const target: ApiProvider = {
+        ...remoteApi,
+        ...remoteMissing,
+        thumbnail: (h: string) => remoteApi.thumbnailUrl(h),
+        thumbnailLarge: (h: string) => remoteApi.largeUrl(h),
+        motionVideoUrl: async (h: string) => remoteBlobUrl(h, "raw"),
+      } as ApiProvider;
+      return (target as unknown as Record<string, unknown>)[prop];
+    }
+    const target: ApiProvider = {
+      ...localApi,
+      ...localMissing,
+      thumbnailUrl: (h: string) => localApi.thumbnail(h),
+      largeUrl: (h: string) => localApi.thumbnailLarge(h),
+      rawUrl: (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),
+      motionVideoUrl: async (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),
+      uploadFiles: async () => { throw new Error("本地模式请使用「导入照片 / 视频」按钮"); },
     } as ApiProvider;
-  }
-  return {
-    ...localApi,
-    ...localMissing,
-    thumbnailUrl: (h: string) => localApi.thumbnail(h),
-    largeUrl: (h: string) => localApi.thumbnailLarge(h),
-    rawUrl: (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),
-    motionVideoUrl: async (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),
-    uploadFiles: async () => { throw new Error("本地模式请使用「导入照片 / 视频」按钮"); },
-  } as ApiProvider;
-})();
+    return (target as unknown as Record<string, unknown>)[prop];
+  },
+});
 
 // 能力开关：组件按此隐藏本地专属入口
 export const platform = {

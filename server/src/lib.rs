@@ -8,6 +8,7 @@ pub mod config;
 pub mod meta;
 pub mod share;
 pub mod storage;
+pub mod totp;
 
 use heart_core::library::HeartCore;
 use std::path::PathBuf;

@@ -38,6 +38,9 @@ input, select, textarea { font-size: 14px; padding: 8px 10px; border-radius: 8px
 .sidebar .logo { font-weight: 700; font-size: 17px; padding: 6px 12px 18px; }
 .sidebar a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: var(--fg); text-decoration: none; cursor: pointer; }
 .sidebar .ic { width: 17px; height: 17px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.ic { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+.ic.filled { fill: currentColor; stroke: none; }
+button .ic, .selbar .ic, .ctx-menu .ic, .lb-bar .ic, #lb-tools .ic { vertical-align: -3px; margin-right: 5px; }
 .sidebar a.active { background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); font-weight: 600; }
 .sidebar a:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
 .sidebar .sec { margin: 14px 12px 4px; font-size: 12px; color: var(--muted); }
@@ -65,6 +68,9 @@ input, select, textarea { font-size: 14px; padding: 8px 10px; border-radius: 8px
 /* ---------- 相册墙 ---------- */
 .album-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-top: 8px; }
 .album-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; cursor: pointer; background: var(--card); }
+.album-card .check { position: absolute; top: 8px; left: 8px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.35); display: grid; place-items: center; color: transparent; z-index: 2; cursor: pointer; }
+.album-card.sel .check { background: var(--primary); border-color: var(--primary); color: #fff; }
+.album-card.sel { outline: 3px solid var(--primary); outline-offset: -3px; }
 .album-card .cov { aspect-ratio: 1; background: var(--input); position: relative; }
 .album-card .cov img { width: 100%; height: 100%; object-fit: cover; }
 .album-card .nm { padding: 10px 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
@@ -77,7 +83,9 @@ input, select, textarea { font-size: 14px; padding: 8px 10px; border-radius: 8px
 table.admin { width: 100%; border-collapse: collapse; margin-top: 10px; }
 table.admin td, table.admin th { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: 14px; }
 table.admin th { color: var(--muted); font-weight: 500; }
-.form-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 10px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.form-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin: 14px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.form-card input, .form-card select { margin-top: 2px; }
+.form-card strong { margin-right: 4px; }
 .form-card label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 
 /* ---------- 模态 ---------- */
@@ -153,7 +161,15 @@ html, body { height: 100%; }
   <p class="hint" style="margin:0 0 16px">家庭加密相册</p>
   <input id="user" placeholder="用户名" autocomplete="username">
   <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
-  <button class="primary" id="login-btn">登录</button>
+  <div id="totp-row" style="display:none">
+    <input id="totp-code" placeholder="两步验证码（6 位数字）" inputmode="numeric" maxlength="6" autocomplete="one-time-code" style="width:100%;margin:8px 0">
+  </div>
+  <div id="slider" class="slider">
+    <div class="slider-fill" id="slider-fill"></div>
+    <div class="slider-thumb" id="slider-thumb">»</div>
+    <span class="slider-text" id="slider-text">按住滑块拖到最右侧</span>
+  </div>
+  <button class="primary" id="login-btn" disabled>登录</button>
 </div>
 
 <div id="app" class="layout">
@@ -171,6 +187,23 @@ html, body { height: 100%; }
     <symbol id="i-storage" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></symbol>
     <symbol id="i-status" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></symbol>
+    <symbol id="i-heart-filled" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
+    <symbol id="i-preview" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+    <symbol id="i-motion" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="7" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="17" y2="20"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></symbol>
+    <symbol id="i-plus-user" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
   </svg>
   <nav class="sidebar">
     <div class="logo">牧心相册</div>
@@ -192,7 +225,7 @@ html, body { height: 100%; }
     <div class="topbar">
       <input type="search" id="search" placeholder="搜索照片 / 相册…">
       <span style="flex:1"></span>
-      <button class="primary" id="upload-btn" style="display:none">⬆ 上传</button>
+      <button class="primary" id="upload-btn" style="display:none"><svg class="ic"><use href="#i-upload"/></svg>上传</button>
       <div style="position:relative">
         <div class="avatar" id="avatar">我</div>
         <div id="avatar-menu" style="display:none;position:absolute;right:0;top:44px;width:230px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 34px rgba(0,0,0,.4);padding:10px;z-index:150;text-align:center">
@@ -200,9 +233,10 @@ html, body { height: 100%; }
             <div class="avatar" id="menu-avatar" style="width:72px;height:72px;font-size:28px;cursor:default">我</div>
           </div>
           <div style="font-weight:600;font-size:17px;margin:8px 0 12px" id="menu-name">我</div>
-          <button id="menu-password" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px">🔒 修改密码</button>
-          <button id="menu-theme" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px">🌓 深色模式</button>
-          <button id="menu-logout" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;color:var(--danger)">↩ 退出登录</button>
+          <button id="menu-password" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px"><svg class="ic"><use href="#i-lock"/></svg>修改密码</button>
+          <button id="menu-totp" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px"><svg class="ic"><use href="#i-shares"/></svg>两步验证 (2FA)</button>
+          <button id="menu-theme" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;margin-bottom:6px"><svg class="ic"><use href="#i-moon"/></svg>深色模式</button>
+          <button id="menu-logout" style="display:block;width:100%;text-align:left;border:none;background:var(--input);padding:12px 16px;border-radius:10px;color:var(--danger)"><svg class="ic"><use href="#i-logout"/></svg>退出登录</button>
         </div>
       </div>
     </div>

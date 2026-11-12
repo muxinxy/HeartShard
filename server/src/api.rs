@@ -116,11 +116,13 @@ fn visible_albums(
 pub struct LoginReq {
     pub name: String,
     pub password: String,
+    /// TOTP 6 位验证码（2fa 启用时必填）
+    pub totp_code: Option<String>,
 }
 
 pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
-    match state.users.login(&req.name, &req.password) {
-        Ok((token, user)) => {
+    match state.users.login(&req.name, &req.password, req.totp_code.as_deref()) {
+        Ok((token, user, totp_required)) => {
             eprintln!("[auth] 登录成功 user={} uid={} admin={}", user.name, user.uid, user.is_admin);
             Json(serde_json::json!({
                 "token": token,
@@ -128,11 +130,19 @@ pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
                 "name": user.name,
                 "is_admin": user.is_admin,
                 "avatar": user.avatar,
+                "totp_required": totp_required,
             }))
             .into_response()
         }
         Err(e) => {
             eprintln!("[auth] 登录失败 user={}: {e}", req.name);
+            if e == "__TOTP_REQUIRED__" {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({ "error": "请输入两步验证码", "totp_required": true })),
+                )
+                    .into_response();
+            }
             err(StatusCode::UNAUTHORIZED, e)
         }
     }
@@ -157,6 +167,30 @@ pub async fn change_own_password(
     match state.users.change_own_password(&user.uid, &req.old, &req.new) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+/// POST /api/me/totp/setup —— 生成 2fa 密钥并启用（返回 otpauth URI + secret）。
+pub async fn totp_setup(State(state): S, headers: HeaderMap) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    match state.users.setup_totp(&user.uid) {
+        Ok(setup) => Json(setup).into_response(),
+        Err(e) => s_err(e),
+    }
+}
+
+/// POST /api/me/totp/disable —— 关闭 2fa。
+pub async fn totp_disable(State(state): S, headers: HeaderMap) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    match state.users.disable_totp(&user.uid) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e),
     }
 }
 
@@ -1072,6 +1106,8 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
         .route("/api/me/password", post(change_own_password))
+        .route("/api/me/totp/setup", post(totp_setup))
+        .route("/api/me/totp/disable", post(totp_disable))
         .route("/favicon.ico", get(favicon))
         .route("/favicon.svg", get(favicon))
         .route("/api/albums", get(list_albums).post(create_album))

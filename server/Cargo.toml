@@ -11,6 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+hmac = "0.12"
+sha1 = "0.10"
+base32 = "0.5"
 mysql_async = { version = "0.34", default-features = false, features = ["minimal-rust"], optional = true }
 heart-core = { path = "../core-rs/crates/heart-core" }
 crypto = { path = "../core-rs/crates/crypto" }

@@ -207,6 +207,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base32"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -867,18 +873,21 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum",
+ "base32",
  "base64 0.22.1",
  "crypto",
  "getrandom 0.2.17",
  "heart-core",
  "heartshard-syncer",
  "hex",
+ "hmac",
  "http-body-util",
  "image",
  "mysql_async",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "tempfile",
  "tokio",

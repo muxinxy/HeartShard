@@ -17,6 +17,26 @@ server and the cloud storage.
 
 ### Added / 新增
 
+**安全 / Security**
+- 登录滑动验证码（前端拖拽，阻止机器人提交）
+  Slider captcha on web login (drag-to-unlock, blocks bot submissions)
+- TOTP 两步验证（RFC 6238，RFC 官方向量测试覆盖）：网页端「头像菜单 →
+  两步验证」绑定/关闭，登录时动态要求验证码
+  TOTP 2FA (RFC 6238, covered by official test vectors): bind/disable via
+  avatar menu on web; login dynamically prompts for the code
+
+首个公开版本。纯客户端、端到端加密的多云相册系统：照片/视频切片后以
+AES-256-GCM 加密、Reed-Solomon 纠删码冗余，分散存储在用户自己的
+S3 / WebDAV / OpenList / FTPS 存储上——服务器（可选）与云存储全程零知识。
+
+First public release. A client-side, end-to-end encrypted multi-cloud photo
+album: photos/videos are sharded, encrypted with AES-256-GCM, redundantly
+erasure-coded (Reed-Solomon), and scattered across the user's own
+S3 / WebDAV / OpenList / FTPS storage — zero-knowledge for both the optional
+server and the cloud storage.
+
+### Added / 新增
+
 **核心 / Core**
 - 加密分片管线：AES-256-GCM（96-bit tag）逐 chunk 加密，Leopard-RS 纠删码
   n=4/m=2 冗余分散，SHA-256 全程校验
@@ -78,6 +98,26 @@ server and the cloud storage.
   streaming (Range requests)
 - 全链路调试日志（[http]/[auth]/[upload]/[meta] 等）
   End-to-end debug logging ([http]/[auth]/[upload]/[meta], etc.)
+
+### Fixed / 修复
+- 双模式切换后 `api` 固化到本地 provider 导致「连接后台」误走本地解锁
+  （现改为动态 Proxy 分派，切换即时生效）
+  Mode switch used a frozen provider — connecting to the server still routed
+  to local unlock; now dispatched dynamically so switching takes effect
+  immediately
+- 上传 multipart 中 `album_id` 排在文件字段后被丢弃 → 照片全部落入
+  「未入相册」（现读完全部字段再绑定）
+  `album_id` after the file field was dropped during multipart parsing,
+  sending every upload to "unfiled"; all fields are now read before binding
+- 照片/视频右键菜单在 Windows 下无响应（菜单 CSS 缺失 + 闭包字符串化）
+  Photo/album context menus were dead on Windows (missing CSS + stringified
+  closures)
+- 相册分享/多选后弹窗与勾选条残留页面（route 现统一清理）
+  Stale modals and selection bars lingered after sharing; route now clears
+  them
+- 修复后仍显示「降级」：repair 落点变更未回写 manifest.storage_id
+  Repaired blobs still showed "degraded": manifest.storage_id was not
+  rewritten when repair relocated shards
 
 ### Changed / 变更
 - 全部用户可见提示中文化

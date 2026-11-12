@@ -21,6 +21,9 @@ pub struct User {
     /// 头像（data URL，≤256KB；空 = 用用户名首字）
     #[serde(default)]
     pub avatar: String,
+    /// TOTP 2fa 密钥（base32；空 = 未启用两步验证）
+    #[serde(default)]
+    pub totp_secret: String,
 }
 
 fn default_true() -> bool {
@@ -93,6 +96,7 @@ impl UserStore {
             is_admin,
             enabled: true,
             avatar: String::new(),
+            totp_secret: String::new(),
         };
         self.meta.save_user(&user)?;
         Ok(user)
@@ -195,6 +199,7 @@ impl UserStore {
                     is_admin: u.admin,
                     enabled: true,
                     avatar: String::new(),
+                    totp_secret: String::new(),
                 }),
             }
         }
@@ -245,27 +250,62 @@ impl UserStore {
         self.meta.save_user(user)
     }
 
-    /// 登录：校验口令，签发会话 token（禁用账户拒绝）。
-    pub fn login(&self, name: &str, password: &str) -> Result<(String, User), String> {
+    /// 启用 2fa：生成密钥（暂存 users 表，confirm 前不生效——直接生效简化 v1）。
+    pub fn setup_totp(&self, uid: &str) -> Result<crate::totp::TotpSetup, String> {
+        let secret = crate::totp::generate_secret();
+        let mut users = self.meta.list_users()?;
+        let user = users.iter_mut().find(|u| u.uid == uid).ok_or("用户不存在")?;
+        user.totp_secret = secret.clone();
+        self.meta.save_user(user)?;
+        Ok(crate::totp::TotpSetup {
+            uri: crate::totp::otpauth_uri(&secret, &user.name, "牧心相册"),
+            secret,
+        })
+    }
+
+    /// 关闭 2fa。
+    pub fn disable_totp(&self, uid: &str) -> Result<(), String> {
+        let mut users = self.meta.list_users()?;
+        let user = users.iter_mut().find(|u| u.uid == uid).ok_or("用户不存在")?;
+        user.totp_secret = String::new();
+        self.meta.save_user(user)
+    }
+
+    /// 登录：校验密码，签发会话 token（禁用账户拒绝；2fa 启用需 totp_code）。
+    pub fn login(
+        &self,
+        name: &str,
+        password: &str,
+        totp_code: Option<&str>,
+    ) -> Result<(String, User, bool), String> {
         let uid = uid_for(name);
         let user = self
             .meta
             .list_users()?
             .into_iter()
             .find(|u| u.uid == uid)
-            .ok_or("用户不存在或口令错误")?;
+            .ok_or("用户名或密码错误")?;
         if !user.enabled {
             return Err("该账户已被禁用".into());
         }
         if !verify_password(password, &user.password_hash) {
-            return Err("用户不存在或口令错误".into());
+            return Err("用户名或密码错误".into());
+        }
+        let totp_required = !user.totp_secret.is_empty();
+        if totp_required {
+            let Some(code) = totp_code else {
+                return Err("__TOTP_REQUIRED__".into());
+            };
+            if !crate::totp::verify(&user.totp_secret, code) {
+                return Err("两步验证码错误".into());
+            }
         }
         let token = random_token();
         self.sessions
             .lock()
             .unwrap()
             .insert(token.clone(), user.uid.clone());
-        Ok((token, user.clone()))
+        Ok((token, user.clone(), totp_required))
     }
 
     pub fn logout(&self, token: &str) {

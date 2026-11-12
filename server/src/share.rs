@@ -96,7 +96,7 @@ fn now() -> u64 {
 fn check_expired(share: &Share) -> Result<(), Response> {
     if let Some(exp) = share.expires_at {
         if now() >= exp {
-            return Err((StatusCode::GONE, "分享已过期").into_response());
+            return Err(err(StatusCode::GONE, "分享已过期"));
         }
     }
     Ok(())

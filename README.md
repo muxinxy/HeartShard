@@ -4,79 +4,107 @@
 >
 > Shatter your memories into pieces — and let every cloud you trust raise them.
 
-[English](README.en.md)
+HeartShard 是一个**端到端加密**的家庭相册系统，覆盖 Windows / Android / Web 三端，
+既可以**纯客户端**使用（无服务器、无账号，直连你自己的云存储），也可以连接
+**自托管后台**获得多用户、网页端与分享链接能力。照片和视频被切碎、加密、
+纠删冗余后分散到你自己的云存储（S3 兼容 / WebDAV / OpenList / FTPS）——
+云存储与后台全程零知识。
 
-HeartShard 是一个**纯客户端、无后端、端到端加密**的多云相册系统，覆盖 Windows / Android / iOS / 鸿蒙四端。照片和视频被切碎、加密、纠删冗余后分散到用户自己的云存储（S3 兼容 / WebDAV / OpenList / FTP）。**没有服务器、没有账号体系、没有中心化索引**——云存储只作为被动 Blob 仓库，所有解密、索引、同步逻辑都运行在客户端。
+HeartShard is an end-to-end encrypted family photo album for Windows, Android
+and the Web. Use it **pure client-side** (no server, no accounts — talking
+straight to your own cloud storage) or connect it to a **self-hosted server**
+for multi-user, web access and share links. Photos/videos are sharded,
+encrypted and scattered across your own S3-compatible / WebDAV / OpenList /
+FTPS storage — the cloud and the server learn nothing.
 
-面向用户：想把照片存在多个云盘 / NAS / S3 桶中，但不愿信任任何单一服务商的隐私敏感用户。
+## 核心特性 / Features
 
-## 核心特性
+- 🔐 **端到端加密**：AES-256-GCM 逐 chunk 加密、Leopard-RS 纠删码（默认 n=4/m=2）
+  冗余、SHA-256 全程校验；口令经 Argon2id 派生主密钥，绝不落盘
+  *End-to-end encryption: per-chunk AES-256-GCM, Leopard-RS erasure coding,
+  SHA-256 everywhere; password never leaves the device (local mode)*
+- 🗂 **相册优先**：时间线、瀑布流网格、相册树、收藏夹、回收站（可恢复）、
+  地图、按天/年月导航——加密与分片细节折叠在"高级详情"里
+  *Album-first UI: timeline, grid, albums, favorites, restorable trash, map —
+  crypto/sharding details tucked away*
+- 🔗 **隐私分享**：相册或单张/多选照片生成链接，**默认去除 EXIF/GPS 元数据**，
+  可选有效期与分享码；浏览器 WebCrypto 解密，服务器只见密文
+  *Privacy sharing: album or multi-photo links with EXIF/GPS stripped by
+  default, optional expiry & access code; WebCrypto decryption, the server
+  only ever sees ciphertext*
+- 👥 **多用户后台**（可选自托管）：argon2id 认证、相册级权限
+  （隐藏/只看/上传/管理，继承+覆盖）、TOTP 两步验证、同步源管理
+  *Optional self-hosted server: argon2id auth, album-level permissions
+  (hidden/view/upload/manage with inheritance), TOTP 2FA, sync sources*
+- 🔄 **多设备同步**：Lamport 时钟 + LWW 合并 + 增量 delta；同步工具
+  （本地目录/云存储 → 相册，append/mirror 策略）
+  *Multi-device sync: Lamport + LWW + delta; syncer CLI for local dirs and
+  cloud sources (append/mirror strategies)*
+- 🎞 **动态照片**：Android Motion Photo（JPEG 尾随 MP4）检测、提取、播放与
+  双文件导出；Apple Live Photo 文件名配对
+  *Motion photos: Android trailing-MP4 detection, extraction, playback and
+  two-file export; Apple Live Photo filename pairing*
+- ☁️ **多云分散**：同一 blob 的分片强制落在不同 Storage；S3（手写 SigV4）/
+  WebDAV / OpenList（令牌）/ FTPS
+  *Multi-cloud: shards of one blob land on different storages; S3
+  (hand-written SigV4), WebDAV, OpenList (token), FTPS*
 
-- 🔐 **端到端加密**：AES-256-GCM 分片加密，每 blob 独立密钥（HKDF 派生），每 chunk 随机 IV；口令经 Argon2id 派生主密钥，口令与密钥绝不落盘
-- 🧩 **分片 + 纠删码**：文件按 256 KiB–4 MiB 切块，Reed-Solomon（默认 n=4, m=2）分散冗余，任一云存储整体丢失仍可完整恢复
-- 🗂 **目录即相册**：Windows 端目录导入为加密索引中的相册树，云上永远看不到原始文件名与目录结构
-- 🔄 **多设备同步**：纯客户端 Lamport 时钟合并，无实时强一致依赖
-- ☁️ **多云分散**：同一 blob 的多个 shard 强制落在不同 Storage；支持 S3 / WebDAV / OpenList / FTP，权重与健康检查
-- 📱 **四端一套核心**：核心逻辑只有一份（Rust），Tauri（Windows/Android/iOS）与 ArkTS 原生（鸿蒙）两套壳共享
+## 两种使用方式 / Two Ways to Use
 
-## 当前进度
+### 1. 纯客户端（serverless）/ Pure client-side
 
-| 里程碑 | 内容 | 状态 |
-|---|---|---|
-| **M0** | MixFile 算法研究 + core-rs（keypath / crypto / ida / shard）+ 测试向量锁定 | ✅ 完成（`fe5d3e6`） |
-| **M1** | Tauri Windows 端：上传 → 本地目录模拟 Storage → 下载还原 → SHA256 校验 | ✅ 完成（E2E 全绿） |
-| **M2** | S3 适配器（SigV4）+ SQLCipher 索引 + 双设备 Lamport 同步 | ✅ 完成（双设备 E2E 时间线一致，冲突裁决单测覆盖） |
-| **M3** | **Android** Tauri 壳（aarch64 APK）+ WebDAV 适配器 + 后台传输 | ✅ 完成（壳/WebDAV/前台服务防回收；§8.5 五阶段向导 UI + import_staging 续传已实现） |
-| **M4** | 鸿蒙 ArkTS 壳 + Rust FFI + OpenList 适配器 | OpenList 适配器 ✅（mock 全端点测试，真实实例验收待用户服务）；鸿蒙壳 ⚠️ 需 DevEco/OHOS SDK（本开发机不可用），见 [开发文档](docs/development.md) |
-| **M5** | iOS + FTP/FTPS + 修复/再平衡任务 + 威胁模型文档 | 修复 ✅、再平衡 ✅、FTP/FTPS ✅（真实服务验收待端点）、[威胁模型](docs/threat-model.md) ✅；iOS ❌ 需 macOS |
-| **§10 UI** | 时间线虚拟滚动（Virtuoso）+ 懒加载缩略图（加密缓存）+ 详情页（EXIF 解析 + 分片分布可视化）+ 一键体检 + 任务中心 + 历史报告重开 + 地图视图（leaflet OSM）+ 大图预览 + 浅色/深色主题 + 相册树（拖拽排序/封面设置） | ✅ 完成 |
-| **§11** | 缩略图本地生成并加密缓存 + 下载 Range 支持 | ✅ 完成（manifest_key 加密缓存 + heartshard-video:// 协议 Range 流式播放） |
-| **产物** | Windows 便携 exe；Android APK（aarch64） | ✅ `dist/` 下两件 + §12.2 三场景 E2E 全绿 |
+桌面/安卓直接添加你的云存储，数据目录放本机——**无服务器、无账号**。
+多设备共享 `mk.wrap` 主密钥文件即可同步。
 
-> 平台优先级（2026-11-01 调整）：**Windows → Android 优先**，iOS 与鸿蒙随后。
-> 剩余如实声明的缺口：增量同步 delta 传输压缩、各协议真实端点验收。
+Add your cloud storage in the desktop app; the data dir lives on your
+machine — no server, no accounts. Share the `mk.wrap` key file across
+devices for sync.
 
-## 快速开始（开发）
+### 2. 连接自托管后台 / Self-hosted server
 
-环境要求：[mise](https://mise.jdx.dev) 管理工具链，终端推荐 pwsh。
+```bash
+docker compose up -d        # 见仓库 docker-compose.yml；或直接跑 server 二进制
+# 浏览器 http://NAS:8420 —— 多用户/相册权限/存储/同步源/分享全网页端管理
+```
+
+- 多用户 + 相册 ACL + TOTP 2FA + 分享链接
+- 桌面客户端锁屏切「连接后台」即可接入；手机 PWA「添加到主屏幕」
+- 详细配置见 [server.toml.example](server/server.toml.example) 与
+  [开发文档](docs/development.md)
+
+## 快速开始（开发）/ Quick start (dev)
 
 ```powershell
 git clone <repo-url> heartshard; cd heartshard
 mise install          # rust stable + node 24 + pnpm
-cargo test --manifest-path core-rs/Cargo.toml --workspace   # 38 个测试应全绿
-cargo run --manifest-path tools/keypath-tests/Cargo.toml    # 键路径共享向量校验（40 条）
+cargo test --manifest-path core-rs/Cargo.toml --workspace
 ```
 
-更多开发细节（环境搭建、架构约定、测试向量链路、提交纪律）见 [开发文档](docs/development.md)。
+构建产物 / Build artifacts：
 
-## 仓库结构
+```powershell
+cd apps\tauri; pnpm tauri build                 # Windows 便携 exe
+.\scripts\build-android-apk.ps1                 # Android APK（arm64）
+cd server; cargo build --release                # 后台服务二进制
+docker compose up -d                            # 或容器化部署
+```
+
+更多细节见 [开发文档](docs/development.md) / [CHANGELOG](CHANGELOG.md)。
+
+## 仓库结构 / Layout
 
 ```
 heartshard/
-├── core-rs/                    # Rust 核心，四端共享（编译为 WASM / cdylib）
-│   └── crates/
-│       ├── keypath/            # 对象键生成 + 文件名校验（四端唯一实现）
-│       ├── crypto/             # AES-256-GCM 分片加密 + Argon2id/HKDF 密钥派生
-│       ├── ida/                # Reed-Solomon 纠删码分散
-│       └── shard/              # blob → chunk → 加密 → 分散 → 重组全管线
-├── apps/                       # 平台壳（M1 起）
-├── tools/keypath-tests/        # 跨端键路径一致性测试（共享向量 + 校验器）
-├── docs/                       # 研究与开发文档
-│   ├── mixfile-study.md        # MixFile 算法研究报告（含测试向量与设计裁决）
-│   ├── fixtures/               # 机器可读测试向量 + 生成脚本（Java/Python 双来源）
-│   └── development.md          # 开发文档
-└── .research/                  # 上游参考仓库克隆（gitignore）
+├── core-rs/crates/             # Rust 核心：keypath / crypto / ida / shard / index
+│   └── heart-core/             # 平台无关库：HeartCore + 云存储适配器
+├── apps/tauri/                 # Windows + Android 客户端（Tauri 2 + React）
+├── server/                     # 牧心后台（axum：多用户/ACL/同步/分享/PWA）
+├── tools/syncer/               # 相册同步 CLI（append/mirror 策略）
+├── scripts/                    # 构建脚本（Android APK 固化链）
+├── docs/                       # 开发文档 / 威胁模型 / 算法研究
+└── .github/workflows/          # 多平台多架构 CI
 ```
 
-## 安全模型（摘要）
+## 许可证 / License
 
-- 云存储服务商只能看到：加密分片、不可读的哈希对象键、加密的 manifest 与索引
-- 口令不落盘，主密钥只存在于会话内存；存储配置中的敏感字段用派生密钥加密后落库
-- 日志脱敏：不打印分片内容、完整 URL query、任何密钥
-- 完整性链条：per-shard SHA-256 → RS 重组 → GCM tag/AAD（绑定 blob/分片位置）→ per-chunk 与 blob 级 SHA-256
-
-完整威胁模型文档随 M5 交付；算法对齐与设计裁决见 [docs/mixfile-study.md](docs/mixfile-study.md)。
-
-## 许可证
-
-待定（TBD）。
+[MIT](LICENSE)

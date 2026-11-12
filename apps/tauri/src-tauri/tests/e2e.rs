@@ -336,10 +336,10 @@ fn wrong_password_fails_at_unlock() {
     core.import_file(&src).unwrap();
     core.lock();
 
-    // SQLCipher：错口令在打开索引时即失败
+    // SQLCipher：错口令在打开索引时即失败（M5 起中文化为「口令不正确」）
     let err = core.unlock("wrong-password").unwrap_err();
     assert!(
-        err.to_string().contains("wrong password"),
+        err.to_string().contains("口令不正确"),
         "unlock must fail on wrong password, got {err}"
     );
     assert!(!core.is_unlocked());

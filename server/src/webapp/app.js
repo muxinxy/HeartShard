@@ -17,6 +17,9 @@ let currentAlbum = "";
 let searchQ = "";
 
 // ---------------- 基础设施 ----------------
+// SVG 极简图标（引用 index.html 的 sprite；替代 emoji）
+const ic = (name, filled = false) => `<svg class="ic${filled ? " filled" : ""}"><use href="#i-${name}"/></svg>`;
+
 function toast(msg, isErr = false) {
   const t = $("toast");
   t.textContent = msg;
@@ -123,20 +126,81 @@ function setAvatarUi(el, u) {
   }
 }
 
+// ---------------- 滑动验证码（拖到底解锁登录按钮） ----------------
+let sliderDone = false;
+(function initSlider() {
+  const slider = $("slider");
+  const thumb = $("slider-thumb");
+  const fill = $("slider-fill");
+  const text = $("slider-text");
+  let dragging = false;
+  const max = () => slider.clientWidth - thumb.offsetWidth - 4;
+  const onMove = (e) => {
+    if (!dragging || sliderDone) return;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const x = Math.max(0, Math.min(max(), cx - 2 - thumb.offsetWidth / 2 + 30));
+    thumb.style.left = 2 + x + "px";
+    fill.style.width = x + thumb.offsetWidth + 4 + "px";
+    if (x >= max()) {
+      sliderDone = true;
+      slider.classList.add("done");
+      text.textContent = "验证通过";
+      $("login-btn").disabled = false;
+    }
+  };
+  const up = () => {
+    if (!sliderDone && dragging) {
+      thumb.style.left = "2px";
+      fill.style.width = "0";
+    }
+    dragging = false;
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", up);
+    window.removeEventListener("touchmove", onMove);
+    window.removeEventListener("touchend", up);
+  };
+  thumb.addEventListener("mousedown", (e) => {
+    if (sliderDone) return;
+    dragging = true;
+    e.preventDefault();
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", up);
+  });
+  thumb.addEventListener("touchstart", (e) => {
+    if (sliderDone) return;
+    dragging = true;
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("touchend", up);
+  }, { passive: true });
+})();
+
 $("login-btn").onclick = async () => {
+  if (!sliderDone) { toast("请先完成滑动验证", true); return; }
   try {
     const data = await fetch("/api/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: $("user").value, password: $("pass").value }),
+      body: JSON.stringify({
+        name: $("user").value,
+        password: $("pass").value,
+        totp_code: $("totp-code").value || undefined,
+      }),
     }).then(async (r) => {
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "登录失败");
-      return r.json();
+      const b = await r.json().catch(() => ({}));
+      if (b.totp_required) {
+        $("totp-row").style.display = "block";
+        $("totp-code").focus();
+        throw new Error(b.error || "请输入两步验证码");
+      }
+      if (!r.ok) throw new Error(b.error || "登录失败");
+      return b;
     });
     token = data.token;
     me = data;
     localStorage.setItem(TOKEN_KEY, token);
     $("pass").value = "";
+    $("totp-code").value = "";
+    $("totp-row").style.display = "none";
     showMain();
   } catch (e) { toast(e.message, true); }
 };
@@ -160,9 +224,69 @@ function toggleTheme() {
   document.body.classList.toggle("theme-light");
   const light = document.body.classList.contains("theme-light");
   localStorage.setItem("hs_theme", light ? "light" : "dark");
-  $("menu-theme").textContent = light ? "☀️ 浅色模式" : "🌙 深色模式";
+  $("menu-theme").textContent = light ? "浅色模式" : "深色模式";
 }
 $("menu-theme").onclick = toggleTheme;
+// 两步验证（TOTP 2fa）：绑定/关闭
+$("menu-totp").onclick = async () => {
+  try {
+    const setup = await api("/api/me/totp/setup", { method: "POST" });
+    modal(`
+      <h3>两步验证 (TOTP 2FA)</h3>
+      <p class="hint">用验证器 App（Google Authenticator / 微软 Authenticator 等）扫码或手动输入密钥：</p>
+      <div style="background:var(--input);border-radius:10px;padding:10px 12px;font-family:monospace;font-size:16px;letter-spacing:2px;text-align:center;word-break:break-all">${setup.secret}</div>
+      <p class="hint" style="word-break:break-all">${setup.uri}</p>
+      <label class="hint">输入 App 显示的 6 位验证码确认启用：</label>
+      <input id="totp-confirm" inputmode="numeric" maxlength="6" style="width:100%;margin:6px 0">
+      <div class="row" style="justify-content:space-between;margin-top:10px">
+        <button class="danger" id="totp-off">关闭两步验证</button>
+        <button class="primary" id="totp-ok">确认启用</button>
+      </div>`);
+    $("totp-ok").onclick = async () => {
+      if (!crate_totp_verify_local(setup.secret, $("totp-confirm").value)) {
+        toast("验证码错误，未启用", true);
+        return;
+      }
+      closeModal();
+      toast("两步验证已启用");
+    };
+    $("totp-off").onclick = async () => {
+      await api("/api/me/totp/disable", { method: "POST" });
+      closeModal();
+      toast("两步验证已关闭");
+    };
+  } catch (e) { toast(e.message, true); }
+};
+// 前端本地 TOTP 校验（确认启用时即时验证；登录仍由后端校验）
+function crate_totp_verify_local(secretB32, code) {
+  if (!/^\d{6}$/.test(code)) return false;
+  // base32 解码
+  const alpha = "abcdefghijklmnopqrstuvwxyz234567";
+  let bits = "";
+  for (const ch of secretB32.toLowerCase()) {
+    const v = alpha.indexOf(ch);
+    if (v < 0) return false;
+    bits += v.toString(2).padStart(5, "0");
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  const now = Math.floor(Date.now() / 1000 / 30);
+  for (const drift of [-1, 0, 1]) {
+    const counter = now + drift;
+    const msg = new Uint8Array(8);
+    new DataView(msg.buffer).setUint32(4, counter);
+    // WebCrypto HMAC-SHA1
+    return crypto.subtle
+      .importKey("raw", new Uint8Array(bytes).buffer, { name: "HMAC", hash: "SHA-1" }, false, ["sign"])
+      .then((key) => crypto.subtle.sign("HMAC", key, msg))
+      .then((sig) => {
+        const d = new Uint8Array(sig);
+        const off = d[19] & 0x0f;
+        const bin = ((d[off] & 0x7f) << 24) | (d[off + 1] << 16) | (d[off + 2] << 8) | d[off + 3];
+        return String(bin % 1000000).padStart(6, "0") === code;
+      });
+  }
+}
 // 头像上传（点菜单大头像 → 选图 → 缩到 256px → data URL）
 $("menu-avatar").onclick = () => $("avatar-input").click();
 $("avatar-input").onchange = async () => {
@@ -279,14 +403,14 @@ function renderSelbar() {
     bar.className = "selbar";
     bar.innerHTML = `
       <span style="font-weight:600">已选 <span id="sel-count">0</span> 张</span>
-      <button id="sel-fav">⭐ 收藏</button>
-      <button id="sel-rename">✏️ 重命名</button>
-      <button id="sel-share">🔗 分享</button>
-      <button id="sel-detail">ℹ️ 详情</button>
-      <button id="sel-download">⬇️ 下载</button>
-      <button id="sel-move">↪️ 移动到</button>
-      <button id="sel-copy">⧉️ 复制到</button>
-      <button class="danger" id="sel-trash">🗑️ 回收站</button>
+      <button id="sel-fav"><svg class="ic"><use href="#i-heart"/></svg>收藏</button>
+      <button id="sel-rename"><svg class="ic"><use href="#i-edit"/></svg>重命名</button>
+      <button id="sel-share"><svg class="ic"><use href="#i-shares"/></svg>分享</button>
+      <button id="sel-detail"><svg class="ic"><use href="#i-status"/></svg>详情</button>
+      <button id="sel-download"><svg class="ic"><use href="#i-download"/></svg>下载</button>
+      <button id="sel-move"><svg class="ic"><use href="#i-albums"/></svg>移动到</button>
+      <button id="sel-copy"><svg class="ic"><use href="#i-box"/></svg>复制到</button>
+      <button class="danger" id="sel-trash"><svg class="ic"><use href="#i-trash"/></svg>回收站</button>
       <button id="sel-cancel">取消</button>`;
     document.body.appendChild(bar);
     $("sel-fav").onclick = () => batch((h) => api(`/api/blobs/${h}/favorite`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ favorite: true }) }), "已收藏");
@@ -560,15 +684,15 @@ function photoCell(b) {
 }
 function photoMenuItems(b) {
   return [
-    { label: "🔍 预览", fn: () => openViewer(b) },
-    { label: b.favorite ? "♥ 取消收藏" : "♡ 收藏", fn: () => fav(b.blob_hash, !b.favorite) },
-    { label: "✏️ 重命名", fn: () => renameDialog(b) },
-    { label: "⬇ 下载原图", fn: () => downloadBlob(b.blob_hash, b.file_name) },
-    { label: "🔗 分享", fn: () => shareDialog([b.blob_hash]) },
-    { label: "ℹ 详情", fn: () => showBlobDetail(b) },
-    { label: "↪ 移动到相册", fn: () => pickAlbumThen("move", [b.blob_hash]) },
-    { label: "⧉ 复制到相册", fn: () => pickAlbumThen("copy", [b.blob_hash]) },
-    { label: "🗑 移入回收站", fn: () => delBlob(b.blob_hash, b.file_name), danger: true },
+    { label: ic("preview") + "预览", fn: () => openViewer(b) },
+    { label: b.favorite ? ic("heart", true) + "取消收藏" : ic("heart") + "收藏", fn: () => fav(b.blob_hash, !b.favorite) },
+    { label: ic("edit") + "重命名", fn: () => renameDialog(b) },
+    { label: ic("download") + "下载原图", fn: () => downloadBlob(b.blob_hash, b.file_name) },
+    { label: ic("shares") + "分享", fn: () => shareDialog([b.blob_hash]) },
+    { label: ic("status") + "详情", fn: () => showBlobDetail(b) },
+    { label: ic("albums") + "移动到相册", fn: () => pickAlbumThen("move", [b.blob_hash]) },
+    { label: ic("box") + "复制到相册", fn: () => pickAlbumThen("copy", [b.blob_hash]) },
+    { label: ic("trash") + "移入回收站", fn: () => delBlob(b.blob_hash, b.file_name), danger: true },
   ];
 }
 function showBlobDetail(b) {
@@ -626,7 +750,7 @@ function openViewer(b) {
   lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1, ox: 0, oy: 0 };
   lbTransform();
   $("lb-title").textContent = (b.is_motion ? "🎞 " : "") + b.file_name;
-  $("lb-fav").textContent = b.favorite ? "♥ 已收藏" : "♡ 收藏";
+  $("lb-fav").innerHTML = b.favorite ? "<svg class=\"ic filled\"><use href=\"#i-heart\"/></svg>" + "已收藏" : "<svg class=\"ic\"><use href=\"#i-heart\"/></svg>" + "收藏";
   // 操作按钮与多选条一致：收藏/重命名/分享/详情/下载/回收站
   $("lb-rename").style.display = "inline-block";
   $("lb-download").style.display = "inline-block";
@@ -639,7 +763,7 @@ function openViewer(b) {
   if (b.is_motion && b.motion_video_hash) {
     const btn = document.createElement("button");
     btn.id = "lb-motion";
-    btn.textContent = "▶ 播放动态";
+    btn.innerHTML = "<svg class=\"ic\"><use href=\"#i-play\"/></svg>" + "播放动态";
     btn.onclick = () => {
       let ov = document.getElementById("lb-motion-overlay");
       if (ov) { ov.remove(); return; }
@@ -793,26 +917,31 @@ async function viewExplore() {
   const motions = all.filter((b) => b.is_motion);
   const placeList = [...places.entries()].sort((a, b) => b[1].length - a[1].length);
   const v = $("view");
-  const card = (dataAttr, icon, label, cnt) => `
+  const card = (dataAttr, iconId, label, cnt) => {
+    const iconSvg = iconId
+      ? `<svg class="ic" style="width:36px;height:36px"><use href="#i-${iconId}"/></svg>`
+      : "";
+    return `
     <div class="album-card" ${dataAttr}>
-      <div class="cov" style="display:grid;place-items:center;font-size:34px">${icon}</div>
+      <div class="cov" style="display:grid;place-items:center">${iconSvg}</div>
       <div class="nm"><span>${label}</span><span class="cnt">${cnt}</span></div>
     </div>`;
+  };
   v.innerHTML = `
     <h2 style="margin:6px 0">探索</h2>
     <h3 class="day-header">类别</h3>
     <div class="album-wall" id="exp-kinds">
-      ${card('data-kind="recent"', "🆕", "最近添加", recent.length)}
-      ${card('data-kind="photo"', "🖼", "照片", photos.length)}
-      ${card('data-kind="video"', "🎬", "视频", videos.length)}
+      ${card('data-kind="recent"', "recent", "最近添加", recent.length)}
+      ${card('data-kind="photo"', "image", "照片", photos.length)}
+      ${card('data-kind="video"', "video", "视频", videos.length)}
       ${card('data-kind="motion"', "🎞", "动态照片", motions.length)}
-      ${card('data-kind="orphan"', "📦", "未入相册", orphans.length)}
+      ${card('data-kind="orphan"', "box", "未入相册", orphans.length)}
     </div>
     <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）</h3>
     ${placeList.length === 0
       ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
       : `<div class="album-wall" id="exp-places">
-          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "📍", k, items.length)).join("")}
+          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "location", k, items.length)).join("")}
         </div>`}`;
   v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("🆕 最近添加", recent);
   v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("🖼 照片", (b) => b.mime.startsWith("image/"));
@@ -891,12 +1020,12 @@ async function viewAlbums() {
   const list = albums.filter((a) => !searchQ || a.name.toLowerCase().includes(searchQ));
   v.innerHTML = `
     <div class="row"><h2 style="margin:6px 0">相册</h2><span style="flex:1"></span>
-      <button class="primary" id="album-new">＋ 新建相册</button></div>
+      <button class="primary" id="album-new"><svg class="ic"><use href="#i-folder-plus"/></svg>新建相册</button></div>
     <div class="album-wall" id="wall">
       ${list.map((a) => `
         <div class="album-card" data-id="${a.id}" style="position:relative">
-          <span class="check" data-aid="${a.id}">✓</span>
-          <div class="cov">${covers[a.id] ? `<img src="/api/blobs/${covers[a.id]}/thumbnail?token=${encodeURIComponent(token)}">` : `<div style="display:grid;place-items:center;height:100%;font-size:34px">📁</div>`}</div>
+          <span class="check" data-aid="${a.id}"><svg class="ic" style="width:12px;height:12px"><use href="#i-explore"/></svg></span>
+          <div class="cov">${covers[a.id] ? `<img src="/api/blobs/${covers[a.id]}/thumbnail?token=${encodeURIComponent(token)}">` : `<div style="display:grid;place-items:center;height:100%"><svg class="ic" style="width:34px;height:34px"><use href="#i-albums"/></svg></div>`}</div>
           <div class="nm"><span>${a.name}</span><span class="cnt">${a.blob_count} 张</span></div>
         </div>`).join("")}
     </div>
@@ -924,10 +1053,10 @@ async function viewAlbums() {
     el.oncontextmenu = (e) => {
       e.preventDefault();
       ctxMenu(e.clientX, e.clientY, [
-        { label: "📂 打开相册", fn: () => { location.hash = `#/album-${aid}`; } },
-        { label: "🔗 分享相册", fn: () => shareAlbum(a) },
-        { label: "🛂 权限", fn: () => openAclEditor(a) },
-        { label: "🗑 删除相册", fn: () => deleteAlbumDialog(a), danger: true },
+        { label: ic("albums") + "打开相册", fn: () => { location.hash = `#/album-${aid}`; } },
+        { label: ic("shares") + "分享相册", fn: () => shareAlbum(a) },
+        { label: ic("lock") + "权限", fn: () => openAclEditor(a) },
+        { label: ic("trash") + "删除相册", fn: () => deleteAlbumDialog(a), danger: true },
       ]);
     };
   });
@@ -1007,8 +1136,8 @@ async function renderAlbumDetail() {
       <span class="badge">${blobs.length} 张</span>
       <span style="flex:1"></span>
       <button id="acl-btn">权限</button>
-      <button id="share-album-btn">🔗 分享相册</button>
-      <button class="danger" id="del-album-btn">删除相册</button>
+      <button id="share-album-btn"><svg class="ic"><use href="#i-shares"/></svg>分享相册</button>
+      <button class="danger" id="del-album-btn"><svg class="ic"><use href="#i-trash"/></svg>删除相册</button>
       <button id="back-albums">返回</button></div>
     <div id="album-grid" class="grid"></div>`;
   const grid = $("album-grid");
@@ -1076,7 +1205,10 @@ window.setAcl = async (albumId, kind, id, perm) => {
 let sharePage = 0;
 const SHARE_PAGE_SIZE = 10;
 async function viewShares() {
-  const shares = await api("/api/shares");
+  const shares = (await api("/api/shares")).map((s) => ({
+    ...s,
+    expired: s.expires_at ? Date.now() / 1000 >= s.expires_at : false,
+  }));
   const pages = Math.max(1, Math.ceil(shares.length / SHARE_PAGE_SIZE));
   if (sharePage >= pages) sharePage = pages - 1;
   const slice = shares.slice(sharePage * SHARE_PAGE_SIZE, (sharePage + 1) * SHARE_PAGE_SIZE);
@@ -1087,7 +1219,7 @@ async function viewShares() {
     ${shares.length === 0 ? `<p class="hint">还没有分享。在照片（勾选圆圈多选）或相册页创建。</p>` : `
     <table class="admin"><tr>
         <th><input type="checkbox" id="sh-all" title="全选/取消全选本页"></th>
-        <th>名称</th><th>类型</th><th>数量</th><th>分享码</th><th>过期</th><th>内容</th><th></th></tr>
+        <th>名称</th><th>类型</th><th>数量</th><th>分享码</th><th>过期</th><th>状态</th><th>内容</th><th></th></tr>
       ${slice.map((s) => `
         <tr><td><input type="checkbox" class="sh-check" data-sid="${s.id}"></td>
         <td>${s.album_name || s.id}</td>
@@ -1095,10 +1227,11 @@ async function viewShares() {
         <td>${(s.blob_hashes || []).length}</td>
         <td>${s.access_code_hash ? "有" : "—"}</td>
         <td>${s.expires_at ? new Date(s.expires_at * 1000).toLocaleString() : "永久"}</td>
+        <td>${s.expired ? '<span class="badge" style="color:var(--danger)">已失效</span>' : '<span class="badge" style="color:var(--success)">有效</span>'}</td>
         <td><button onclick="showShareList('${s.id}')">查看内容</button></td>
         <td class="row">
           <button onclick="copyShare('${s.id}')">复制链接</button>
-          <button class="danger" onclick="cancelShare('${s.id}')">取消分享</button>
+          ${s.expired ? "" : `<button class="danger" onclick="cancelShare('${s.id}')">取消分享</button>`}
         </td></tr>`).join("")}
     </table>
     ${pages > 1 ? `<div class="row" style="justify-content:center;margin-top:12px">
@@ -1149,7 +1282,12 @@ window.cancelShare = (id) => {
 };
 window.showShareList = async (id) => {
   try {
-    const meta = await fetch(`/s/${id}/meta`).then((r) => r.json());
+    const res = await fetch(`/s/${id}/meta`);
+    // 后端对不存在/过期分享返回 JSON 错误体；这里统一解析避免 "Unexpected token" 原文报错
+    const body = await res.text();
+    let meta;
+    try { meta = JSON.parse(body); } catch { throw new Error(body || `HTTP ${res.status}`); }
+    if (!res.ok) throw new Error(meta.error || `HTTP ${res.status}`);
     modal(`<h3>分享内容：${meta.album}</h3>
       <table class="admin">${(meta.files || []).map((f) => `
         <tr><td>${f.name}</td>
@@ -1239,9 +1377,9 @@ async function viewAdminUsers() {
       </div>
       <div class="nm"><span>${u.name}${u.is_admin ? ' <span class="badge">管理员</span>' : ""}${u.enabled === false ? ' <span class="badge" style="color:var(--danger)">已禁用</span>' : ""}</span></div>
       <div class="row" style="padding:0 10px 10px">
-        <button onclick="editUser('${u.uid}')">✏️ 编辑</button>
-        <button onclick="resetPw('${u.uid}','${u.name}')">🔑 重置密码</button>
-        <button class="danger" onclick="delUser('${u.uid}','${u.name}')">🗑 删除</button>
+        <button onclick="editUser('${u.uid}')"><svg class="ic"><use href="#i-edit"/></svg>编辑</button>
+        <button onclick="resetPw('${u.uid}','${u.name}')"><svg class="ic"><use href="#i-lock"/></svg>重置密码</button>
+        <button class="danger" onclick="delUser('${u.uid}','${u.name}')"><svg class="ic"><use href="#i-trash"/></svg>删除</button>
       </div>
     </div>`;
   $("view").innerHTML = `
@@ -1386,8 +1524,8 @@ async function viewAdminGroups() {
           </div>
           <div class="nm"><span>${g.name}</span><span class="cnt">${g.members.length} 人</span></div>
           <div class="row" style="padding:0 10px 10px">
-            <button onclick="editGroup('${g.gid}')">✏️ 编辑</button>
-            ${g.gid !== "family" ? `<button class="danger" onclick="delGroup('${g.gid}','${g.name}')">🗑 删除</button>` : ""}
+            <button onclick="editGroup('${g.gid}')"><svg class="ic"><use href="#i-edit"/></svg>编辑</button>
+            ${g.gid !== "family" ? `<button class="danger" onclick="delGroup('${g.gid}','${g.name}')"><svg class="ic"><use href="#i-trash"/></svg>删除</button>` : ""}
           </div>
         </div>`).join("")}
       <div class="album-card" style="border:2px dashed var(--border);display:grid;place-items:center;min-height:220px;cursor:pointer" onclick="addGroupDialog()">
@@ -1673,7 +1811,7 @@ async function viewAdminStatus() {
       <tr><th>同步源</th><td>${st.sources}</td></tr>
       <tr><th>同步间隔</th><td>${st.sync_interval_secs > 0 ? `${st.sync_interval_secs} 秒` : "关闭（仅手动）"}</td></tr>
     </table>
-    <div class="form-card"><span class="hint">手动触发一次全源同步：</span><button class="primary" id="sync-run">立即同步</button><span id="sync-out" class="hint"></span></div>`;
+    <div class="form-card"><span class="hint">手动触发一次全源同步：</span><button class="primary" id="sync-run"><svg class="ic"><use href="#i-refresh"/></svg>立即同步</button><span id="sync-out" class="hint"></span></div>`;
   $("sync-run").onclick = async () => {
     $("sync-out").textContent = "同步中…";
     try {
