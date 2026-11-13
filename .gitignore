@@ -5,7 +5,11 @@
 target/
 
 # tauri build-time generated schemas / platform glue
-apps/tauri/src-tauri/gen/
+# gen/android 工程源码已入库（含 buildSrc 的跳过 rust task 补丁）；产物与生成物忽略
+apps/tauri/src-tauri/gen/schemas/
+apps/tauri/src-tauri/gen/heartshard-release.keystore
+apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/
+apps/tauri/src-tauri/gen/android/app/src/main/assets/
 
 # android signing keys — never commit
 *.keystore

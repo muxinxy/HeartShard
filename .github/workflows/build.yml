@@ -159,9 +159,6 @@ jobs:
       - name: Install frontend deps
         working-directory: apps/tauri
         run: pnpm install --frozen-lockfile
-      - name: Init android project (if absent)
-        working-directory: apps/tauri
-        run: pnpm tauri android init || echo ok
       - name: Build .so
         working-directory: apps/tauri
         run: |
