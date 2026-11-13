@@ -119,7 +119,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Init android project (if absent)
         working-directory: apps/tauri
-        run: pnpm tauri android init || echo "gen/android 已存在则跳过"
+        run: pnpm tauri android init || echo ok
       - name: Build .so
         working-directory: apps/tauri
         run: pnpm tauri android build --target ${{ matrix.target }} || true
