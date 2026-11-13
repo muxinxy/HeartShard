@@ -140,8 +140,7 @@ jobs:
           cp "$SO" "src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
           chmod +x src-tauri/gen/android/gradlew
           cd src-tauri/gen/android
-          ./gradlew assemble${ABI^}Release -PtargetAbi=$ABI --no-daemon || \
-            ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleArm64Release --no-daemon || ./gradlew assembleRelease --no-daemon
         env:
           HEARTSHARD_SKIP_RUST_TASK: "1"
           JAVA_HOME: ${{ env.JAVA_HOME }}
