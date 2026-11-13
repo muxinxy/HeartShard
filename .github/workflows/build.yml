@@ -5,11 +5,15 @@
 #   - Android APK：arm64-v8a / armeabi-v7a / x86_64
 # 触发：push 到 main 或手动（workflow_dispatch）
 #
-# 注意：仓库 .cargo/config.toml 将 target-dir 固定为仓库根 target/，
-#       所有产物路径均按仓库根 target/ 计算。
-#       SQLCipher 依赖 vendored OpenSSL（patches/openssl-src），交叉编译
-#       不用 cross（其容器挂载不含路径依赖的父 workspace），改用 docker
-#       直接挂载全仓库 + 多架构 gcc。
+# 注意：
+#   - 仓库 .cargo/config.toml 将 target-dir 固定为仓库根 target/，所有产物路径
+#     均按仓库根 target/ 计算。
+#   - 仓库 .cargo/config.toml 将 crates.io 替换为 rsproxy 镜像；CI（海外 runner）
+#     通过 --config / 就近 config 把该 source 指回官方 sparse index。
+#   - SQLCipher 依赖 vendored OpenSSL（patches/openssl-src）；交叉编译不用 cross
+#     （其容器缺路径依赖的父 workspace），改用 docker 挂载全仓库 + 多架构 gcc。
+#   - tauri android 的 --target 只接受短名（aarch64/arm/x86_64）；gradle 任务名
+#     跟 flavor 走（assembleArm64Release / assembleArmRelease / assembleX86_64Release）。
 
 name: build
 
@@ -33,34 +37,36 @@ jobs:
             docker: false
           - target: aarch64-unknown-linux-gnu
             docker: true
+            packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+            cc: aarch64-linux-gnu-gcc
           - target: armv7-unknown-linux-gnueabihf
             docker: true
+            packages: gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
+            cc: arm-linux-gnueabihf-gcc
           - target: i686-unknown-linux-gnu
             docker: true
+            packages: gcc-multilib libc6-dev-i386
+            cc: gcc
     steps:
       - uses: actions/checkout@v4
       - name: Build (native)
         if: ${{ !matrix.docker }}
         working-directory: server
-        run: cargo build --release --target x86_64-unknown-linux-gnu
+        run: cargo --config 'source.rsproxy-sparse.registry="sparse+https://index.crates.io/"' build --release --target x86_64-unknown-linux-gnu
       - name: Build (docker cross)
         if: matrix.docker
         run: |
           T="${{ matrix.target }}"
           U=$(echo "$T" | tr '[:lower:]-' '[:upper:]_')
-          case "$T" in
-            aarch64-unknown-linux-gnu)     GCCPKG=gcc-aarch64-linux-gnu;      CC=aarch64-linux-gnu-gcc;;
-            armv7-unknown-linux-gnueabihf) GCCPKG=gcc-arm-linux-gnueabihf;    CC=arm-linux-gnueabihf-gcc;;
-            i686-unknown-linux-gnu)        GCCPKG=gcc-i686-linux-gnu;         CC=i686-linux-gnu-gcc;;
-            *) echo "unknown target $T"; exit 1;;
-          esac
-          AR="${CC%gcc}-ar"
+          CC="${{ matrix.cc }}"
+          AR="${{ matrix.cc }}"
+          AR="${AR%gcc}ar"
           docker run --rm -v "$PWD":/work -w /work/server \
             -e "CARGO_TARGET_${U}_LINKER=$CC" \
             -e "CARGO_TARGET_${U}_CC=$CC" \
             -e "CARGO_TARGET_${U}_AR=$AR" \
             -e "CC=$CC" -e "AR=$AR" \
-            rust:1 bash -c "set -e; apt-get update -qq && apt-get install -y -qq --no-install-recommends pkg-config perl $GCCPKG >/dev/null; rustup target add $T; cargo build --release --target $T"
+            rust:1 bash -c "set -e; apt-get update -qq && apt-get install -y -qq ${{ matrix.packages }} pkg-config perl >/dev/null; rustup target add $T; cargo --config 'source.rsproxy-sparse.registry=\"sparse+https://index.crates.io/\"' build --release --target $T"
       - name: Prepare
         run: |
           mkdir -p dist
@@ -77,9 +83,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - name: Build server
         working-directory: server
-        run: cargo build --release
+        run: cargo --config 'source.rsproxy-sparse.registry="sparse+https://index.crates.io/"' build --release
+      - name: Redirect frontend cargo registry to crates.io
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path apps/tauri/.cargo | Out-Null
+          Set-Content -Path apps/tauri/.cargo/config.toml -Value '[source.rsproxy-sparse]'
+          Add-Content -Path apps/tauri/.cargo/config.toml -Value 'registry = "sparse+https://index.crates.io/"'
       - name: Build desktop portable exe
         working-directory: apps/tauri
         run: |
@@ -108,10 +124,16 @@ jobs:
         include:
           - abi: arm64-v8a
             target: aarch64-linux-android
+            tauri_target: aarch64
+            gradle_task: assembleArm64Release
           - abi: armeabi-v7a
             target: armv7-linux-androideabi
+            tauri_target: arm
+            gradle_task: assembleArmRelease
           - abi: x86_64
             target: x86_64-linux-android
+            tauri_target: x86_64
+            gradle_task: assembleX86_64Release
     steps:
       - uses: actions/checkout@v4
       - name: Setup Java
@@ -142,9 +164,15 @@ jobs:
         run: pnpm tauri android init || echo ok
       - name: Build .so
         working-directory: apps/tauri
-        run: pnpm tauri android build --target ${{ matrix.target }} || true
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: |
+          NDK_ROOT=$(ls -d "$ANDROID_HOME"/ndk/*/ | head -1)
+          export ANDROID_NDK_ROOT="$NDK_ROOT"
+          export NDK_HOME="$NDK_ROOT"
+          pnpm tauri android build --target ${{ matrix.tauri_target }} || true
+          if ! ls target/${{ matrix.target }}/release/libtauri_lib.so >/dev/null 2>&1 && ! ls ../target/${{ matrix.target }}/release/libtauri_lib.so >/dev/null 2>&1; then
+            echo "libtauri_lib.so 未生成（cargo 交叉编译失败）"
+            exit 1
+          fi
       - name: Sync frontend assets
         working-directory: apps/tauri
         shell: pwsh
@@ -156,15 +184,18 @@ jobs:
         run: |
           ABI="${{ matrix.abi }}"
           mkdir -p "apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI"
-          SO=$(find target apps/tauri/src-tauri/target -name "libtauri_lib.so" -path "*${{ matrix.target }}*" 2>/dev/null | head -1)
+          SO=$(find target apps/tauri/src-tauri -name "libtauri_lib.so" -path "*${{ matrix.target }}*" 2>/dev/null | head -1)
           if [ -z "$SO" ]; then echo "libtauri_lib.so not found"; exit 1; fi
           cp "$SO" "apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
           chmod +x apps/tauri/src-tauri/gen/android/gradlew
           cd apps/tauri/src-tauri/gen/android
-          ./gradlew assembleArm64Release --no-daemon || ./gradlew assembleRelease --no-daemon
+          ./gradlew ${{ matrix.gradle_task }} --no-daemon
         env:
           HEARTSHARD_SKIP_RUST_TASK: "1"
-          JAVA_HOME: ${{ env.JAVA_HOME }}
+          TAURI_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/apps/tauri/android-release.keystore
+          TAURI_ANDROID_KEYSTORE_PASSWORD: heartshard-2026
+          TAURI_ANDROID_KEY_ALIAS: heartshard
+          TAURI_ANDROID_KEY_PASSWORD: heartshard-2026
       - uses: actions/upload-artifact@v4
         with:
           name: android-${{ matrix.abi }}
