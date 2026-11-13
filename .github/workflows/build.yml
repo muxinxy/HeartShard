@@ -49,10 +49,13 @@ jobs:
             cc: gcc
     steps:
       - uses: actions/checkout@v4
+      # CI（海外 runner）不走 rsproxy 镜像：注释掉 replace-with 即回官方 crates.io
+      - name: Use crates.io directly
+        run: sed -i "s/^replace-with/# replace-with/" .cargo/config.toml
       - name: Build (native)
         if: ${{ !matrix.docker }}
         working-directory: server
-        run: cargo --config 'source.rsproxy-sparse.registry="sparse+https://index.crates.io/"' build --release --target x86_64-unknown-linux-gnu
+        run: cargo build --release --target x86_64-unknown-linux-gnu
       - name: Build (docker cross)
         if: matrix.docker
         run: |
@@ -66,7 +69,7 @@ jobs:
             -e "CARGO_TARGET_${U}_CC=$CC" \
             -e "CARGO_TARGET_${U}_AR=$AR" \
             -e "CC=$CC" -e "AR=$AR" \
-            rust:1 bash -c "set -e; apt-get update -qq && apt-get install -y -qq ${{ matrix.packages }} pkg-config perl >/dev/null; rustup target add $T; cargo --config 'source.rsproxy-sparse.registry=\"sparse+https://index.crates.io/\"' build --release --target $T"
+            rust:1 bash -c "set -e; sed -i 's/^replace-with/# replace-with/' /work/.cargo/config.toml; apt-get update -qq && apt-get install -y -qq ${{ matrix.packages }} pkg-config perl >/dev/null; rustup target add $T; cd /work/server && cargo build --release --target $T"
       - name: Prepare
         run: |
           mkdir -p dist
@@ -87,15 +90,12 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9
+      - name: Use crates.io directly
+        shell: pwsh
+        run: (Get-Content .cargo/config.toml) -replace '^replace-with', '# replace-with' | Set-Content .cargo/config.toml
       - name: Build server
         working-directory: server
-        run: cargo --config 'source.rsproxy-sparse.registry="sparse+https://index.crates.io/"' build --release
-      - name: Redirect frontend cargo registry to crates.io
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path apps/tauri/.cargo | Out-Null
-          Set-Content -Path apps/tauri/.cargo/config.toml -Value '[source.rsproxy-sparse]'
-          Add-Content -Path apps/tauri/.cargo/config.toml -Value 'registry = "sparse+https://index.crates.io/"'
+        run: cargo build --release
       - name: Build desktop portable exe
         working-directory: apps/tauri
         run: |
@@ -128,7 +128,7 @@ jobs:
             gradle_task: assembleArm64Release
           - abi: armeabi-v7a
             target: armv7-linux-androideabi
-            tauri_target: arm
+            tauri_target: armv7
             gradle_task: assembleArmRelease
           - abi: x86_64
             target: x86_64-linux-android
@@ -168,6 +168,9 @@ jobs:
           NDK_ROOT=$(ls -d "$ANDROID_HOME"/ndk/*/ | head -1)
           export ANDROID_NDK_ROOT="$NDK_ROOT"
           export NDK_HOME="$NDK_ROOT"
+          # OpenSSL make install 需要 NDK 工具链（ranlib 等）在 PATH
+          export PATH="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          sed -i "s/^replace-with/# replace-with/" ../.cargo/config.toml || true
           pnpm tauri android build --target ${{ matrix.tauri_target }} || true
           if ! ls target/${{ matrix.target }}/release/libtauri_lib.so >/dev/null 2>&1 && ! ls ../target/${{ matrix.target }}/release/libtauri_lib.so >/dev/null 2>&1; then
             echo "libtauri_lib.so 未生成（cargo 交叉编译失败）"
