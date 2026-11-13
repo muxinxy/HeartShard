@@ -114,7 +114,9 @@ jobs:
         with:
           version: 9
       - name: Install NDK via sdkmanager
-        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" >/dev/null || "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKM" --install "ndk;28.2.13676358" >/dev/null || "$SDKM" --install "ndk;27.2.12479018" >/dev/null
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
       - name: Init android project (if absent)
