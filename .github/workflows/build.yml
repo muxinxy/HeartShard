@@ -170,9 +170,9 @@ jobs:
           export NDK_HOME="$NDK_ROOT"
           # OpenSSL make install 需要 NDK 工具链（ranlib 等）在 PATH
           export PATH="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-          sed -i "s/^replace-with/# replace-with/" ../.cargo/config.toml || true
+          sed -i "s/^replace-with/# replace-with/" "$GITHUB_WORKSPACE/.cargo/config.toml" || true
           pnpm tauri android build --target ${{ matrix.tauri_target }} || true
-          if ! ls target/${{ matrix.target }}/release/libtauri_lib.so >/dev/null 2>&1 && ! ls ../target/${{ matrix.target }}/release/libtauri_lib.so >/dev/null 2>&1; then
+          if ! ls "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/libtauri_lib.so" >/dev/null 2>&1; then
             echo "libtauri_lib.so 未生成（cargo 交叉编译失败）"
             exit 1
           fi
@@ -202,4 +202,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: android-${{ matrix.abi }}
-          path: apps/tauri/src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
+          path: apps/tauri/src-tauri/gen/android/app/build/outputs/apk/**/release/app-*-release.apk
