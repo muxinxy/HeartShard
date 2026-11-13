@@ -102,8 +102,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # runner 自带 Android SDK（ANDROID_HOME 已设）；不用 setup-android action
+      # （其 sdkmanager --update 在 ubuntu-22.04 镜像上会因许可/网络失败）
+      - name: Accept SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -111,12 +113,18 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9
+      - name: Install NDK via sdkmanager
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" >/dev/null || "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
       - name: Init android project (if absent)
         working-directory: apps/tauri
-        run: pnpm tauri android init || echo "gen/android 已提交则跳过"
+        run: pnpm tauri android init || echo "gen/android 已存在则跳过"
       - name: Build .so
         working-directory: apps/tauri
         run: pnpm tauri android build --target ${{ matrix.target }} || true
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
       - name: Sync frontend assets
         working-directory: apps/tauri
         shell: pwsh
@@ -125,16 +133,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path src-tauri/gen/android/app/src/main/assets | Out-Null
           Copy-Item dist/* src-tauri/gen/android/app/src/main/assets -Recurse -Force
       - name: Copy .so + gradle
-        shell: pwsh
         run: |
-          $abi = "${{ matrix.abi }}"
-          New-Item -ItemType Directory -Force -Path "src-tauri/gen/android/app/src/main/jniLibs/$abi" | Out-Null
-          $so = Get-ChildItem "src-tauri/target" -Recurse -Filter "libtauri_lib.so" | Where-Object { $_.FullName -match [regex]::Escape("${{ matrix.target }}") } | Select-Object -First 1
-          Copy-Item $so.FullName "src-tauri/gen/android/app/src/main/jniLibs/$abi/libtauri_lib.so" -Force
-          Set-Location src-tauri/gen/android
-          gradlew.bat assemble${(Get-Culture).TextInfo.ToTitleCase($abi.Replace('-',' ').Replace('v8a','V8a').Replace('armeabi','Armeabi')).Replace(' ','')}Release
+          ABI="${{ matrix.abi }}"
+          mkdir -p "src-tauri/gen/android/app/src/main/jniLibs/$ABI"
+          SO=$(find "src-tauri/target" -name "libtauri_lib.so" -path "*${{ matrix.target }}*" | head -1)
+          cp "$SO" "src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
+          chmod +x src-tauri/gen/android/gradlew
+          cd src-tauri/gen/android
+          ./gradlew assemble${ABI^}Release -PtargetAbi=$ABI --no-daemon || \
+            ./gradlew assembleRelease --no-daemon
         env:
           HEARTSHARD_SKIP_RUST_TASK: "1"
+          JAVA_HOME: ${{ env.JAVA_HOME }}
       - uses: actions/upload-artifact@v4
         with:
           name: android-${{ matrix.abi }}
