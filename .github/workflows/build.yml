@@ -189,7 +189,9 @@ jobs:
           mkdir -p "apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI"
           SO=$(find target apps/tauri/src-tauri -name "libtauri_lib.so" -path "*${{ matrix.target }}*" ! -path "*jniLibs*" 2>/dev/null | head -1)
           if [ -z "$SO" ]; then echo "libtauri_lib.so not found"; exit 1; fi
-          cp "$SO" "apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
+          DEST="apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
+          # tauri CLI 已把 jniLibs 链接建好时跳过拷贝（cp 会报 same file）
+          if [ ! -e "$DEST" ]; then cp "$SO" "$DEST"; fi
           chmod +x apps/tauri/src-tauri/gen/android/gradlew
           cd apps/tauri/src-tauri/gen/android
           ./gradlew ${{ matrix.gradle_task }} --no-daemon
