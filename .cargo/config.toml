@@ -16,9 +16,9 @@ index = "sparse+https://rsproxy.cn/index/"
 check-revoke = false
 
 [env]
-# SQLCipher vendored-openssl 构建：perl 来自 scoop（详见 docs/development.md §1）
+# SQLCipher vendored-openssl 构建：Android/交叉目标禁用汇编（详见 docs/development.md §1）
+# perl 直接取 PATH（本机 scoop perl / CI runner 自带 perl / docker 镜像内置 perl）
 OPENSSL_NO_ASM = "1"
-OPENSSL_SRC_PERL = 'D:\Scoop\apps\perl\current\perl\bin\perl.exe'
 
 [build]
 # 全仓库共享 target：openssl/sqlcipher 只编译一次（core-rs / apps/tauri / tools 共用）

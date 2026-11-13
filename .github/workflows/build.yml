@@ -4,6 +4,12 @@
 #   - 桌面便携 exe：x86_64-pc-windows-msvc
 #   - Android APK：arm64-v8a / armeabi-v7a / x86_64
 # 触发：push 到 main 或手动（workflow_dispatch）
+#
+# 注意：仓库 .cargo/config.toml 将 target-dir 固定为仓库根 target/，
+#       所有产物路径均按仓库根 target/ 计算。
+#       SQLCipher 依赖 vendored OpenSSL（patches/openssl-src），交叉编译
+#       不用 cross（其容器挂载不含路径依赖的父 workspace），改用 docker
+#       直接挂载全仓库 + 多架构 gcc。
 
 name: build
 
@@ -24,30 +30,41 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            cross: false
+            docker: false
           - target: aarch64-unknown-linux-gnu
-            cross: true
+            docker: true
           - target: armv7-unknown-linux-gnueabihf
-            cross: true
+            docker: true
           - target: i686-unknown-linux-gnu
-            cross: true
+            docker: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --locked
-      - name: Build
+      - name: Build (native)
+        if: ${{ !matrix.docker }}
         working-directory: server
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Build (docker cross)
+        if: matrix.docker
         run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+          T="${{ matrix.target }}"
+          U=$(echo "$T" | tr '[:lower:]-' '[:upper:]_')
+          case "$T" in
+            aarch64-unknown-linux-gnu)     GCCPKG=gcc-aarch64-linux-gnu;      CC=aarch64-linux-gnu-gcc;;
+            armv7-unknown-linux-gnueabihf) GCCPKG=gcc-arm-linux-gnueabihf;    CC=arm-linux-gnueabihf-gcc;;
+            i686-unknown-linux-gnu)        GCCPKG=gcc-i686-linux-gnu;         CC=i686-linux-gnu-gcc;;
+            *) echo "unknown target $T"; exit 1;;
+          esac
+          AR="${CC%gcc}-ar"
+          docker run --rm -v "$PWD":/work -w /work/server \
+            -e "CARGO_TARGET_${U}_LINKER=$CC" \
+            -e "CARGO_TARGET_${U}_CC=$CC" \
+            -e "CARGO_TARGET_${U}_AR=$AR" \
+            -e "CC=$CC" -e "AR=$AR" \
+            rust:1 bash -c "set -e; apt-get update -qq && apt-get install -y -qq --no-install-recommends pkg-config perl $GCCPKG >/dev/null; rustup target add $T; cargo build --release --target $T"
       - name: Prepare
         run: |
           mkdir -p dist
-          cp server/target/${{ matrix.target }}/release/heartshard-server dist/heartshard-server-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/heartshard-server dist/heartshard-server-${{ matrix.target }}
           cp server/server.toml.example dist/server.toml.example
       - uses: actions/upload-artifact@v4
         with:
@@ -75,8 +92,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item server/target/release/heartshard-server.exe dist/
-          Copy-Item apps/tauri/target/release/heartshard-tauri.exe dist/HeartShard-0.1.0-x64-portable.exe
+          Copy-Item target/release/heartshard-server.exe dist/
+          Copy-Item target/release/heartshard-tauri.exe dist/HeartShard-0.1.0-x64-portable.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -118,6 +135,7 @@ jobs:
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$SDKM" --install "ndk;28.2.13676358" >/dev/null || "$SDKM" --install "ndk;27.2.12479018" >/dev/null
       - name: Install frontend deps
+        working-directory: apps/tauri
         run: pnpm install --frozen-lockfile
       - name: Init android project (if absent)
         working-directory: apps/tauri
@@ -137,11 +155,12 @@ jobs:
       - name: Copy .so + gradle
         run: |
           ABI="${{ matrix.abi }}"
-          mkdir -p "src-tauri/gen/android/app/src/main/jniLibs/$ABI"
-          SO=$(find "src-tauri/target" -name "libtauri_lib.so" -path "*${{ matrix.target }}*" | head -1)
-          cp "$SO" "src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
-          chmod +x src-tauri/gen/android/gradlew
-          cd src-tauri/gen/android
+          mkdir -p "apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI"
+          SO=$(find target apps/tauri/src-tauri/target -name "libtauri_lib.so" -path "*${{ matrix.target }}*" 2>/dev/null | head -1)
+          if [ -z "$SO" ]; then echo "libtauri_lib.so not found"; exit 1; fi
+          cp "$SO" "apps/tauri/src-tauri/gen/android/app/src/main/jniLibs/$ABI/libtauri_lib.so"
+          chmod +x apps/tauri/src-tauri/gen/android/gradlew
+          cd apps/tauri/src-tauri/gen/android
           ./gradlew assembleArm64Release --no-daemon || ./gradlew assembleRelease --no-daemon
         env:
           HEARTSHARD_SKIP_RUST_TASK: "1"
