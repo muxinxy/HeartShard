@@ -114,6 +114,55 @@ pub async fn add_storage(
     }
 }
 
+/// 添加前探针：按配置临时构造适配器列根目录（不落库）；与 add_storage 同字段。
+pub async fn probe_storage(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<AddStorageReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    if !user.is_admin {
+        return err(StatusCode::FORBIDDEN, "仅管理员");
+    }
+    let cfg = match req.kind.as_str() {
+        "local" => serde_json::json!({ "root": req.root.clone().unwrap_or_default() }),
+        "s3" => serde_json::json!({
+            "endpoint": req.endpoint.clone().unwrap_or_default(),
+            "bucket": req.bucket.clone().unwrap_or_default(),
+            "access_key": req.access_key.clone().unwrap_or_default(),
+            "secret_key": req.secret_key.clone().unwrap_or_default(),
+            "region": req.region.clone().unwrap_or_else(|| "us-east-1".into()),
+            "path_style": req.path_style.unwrap_or(true),
+        }),
+        "webdav" => serde_json::json!({
+            "base_url": req.endpoint.clone().unwrap_or_default(),
+            "username": req.username.clone().unwrap_or_default(),
+            "password": req.password.clone().unwrap_or_default(),
+        }),
+        "openlist" => serde_json::json!({
+            "base_url": req.endpoint.clone().unwrap_or_default(),
+            "token": req.token.clone().unwrap_or_default(),
+            "base_path": req.base_path.clone().unwrap_or_else(|| "/heartshard".into()),
+        }),
+        "ftp" => serde_json::json!({
+            "host": req.endpoint.clone().unwrap_or_default(),
+            "port": 990u16,
+            "username": req.username.clone().unwrap_or_default(),
+            "password": req.password.clone().unwrap_or_default(),
+            "secure": true,
+            "base_path": req.base_path.clone().unwrap_or_else(|| "/heartshard".into()),
+        }),
+        other => return err(StatusCode::BAD_REQUEST, format!("未知存储类型: {other}")),
+    };
+    match heart_core::probe_storage(&req.kind, cfg) {
+        Ok(msg) => Json(serde_json::json!({ "ok": true, "msg": msg })).into_response(),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e })).into_response(),
+    }
+}
+
 pub async fn remove_storage(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

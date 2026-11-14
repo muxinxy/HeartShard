@@ -15,6 +15,7 @@ let selected = new Set();          // 照片勾选
 let selectedAlbums = new Set();    // 相册勾选
 let currentAlbum = "";
 let searchQ = "";
+let albumSort = "";  // 相册排序模式（网页端与桌面端一致）
 
 // ---------------- 基础设施 ----------------
 // SVG 极简图标（引用 index.html 的 sprite；替代 emoji）
@@ -508,20 +509,21 @@ async function batch(fn, okMsg) {
 }
 // 分享弹窗（聚合/逐个 + 可选分享码）
 function shareDialog(hashes) {
+  const single = hashes.length === 1;
   modal(`
     <h3>分享 ${hashes.length} 张照片</h3>
     <p class="hint">链接分享默认去掉照片元数据（EXIF/GPS），接收者无需登录即可在浏览器解密查看。</p>
-    <div class="row" style="margin:8px 0">
+    ${single ? "" : `<div class="row" style="margin:8px 0">
       <label><input type="radio" name="share-mode" value="agg" checked> 聚合分享（一个链接）</label>
       <label style="margin-left:12px"><input type="radio" name="share-mode" value="each"> 逐个分享（每张一个链接）</label>
-    </div>
+    </div>`}
     <div class="row">
       <label>有效期 <select id="share-exp"><option value="">永久</option><option value="1">1 天</option><option value="7">7 天</option><option value="30">30 天</option></select></label>
       <input id="share-code" placeholder="分享码（可选）">
     </div>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="primary" id="share-go">创建链接</button></div>`);
   $("share-go").onclick = async () => {
-    const mode = document.querySelector('input[name="share-mode"]:checked').value;
+    const mode = document.querySelector('input[name="share-mode"]:checked')?.value || "agg";
     const exp = $("share-exp").value ? Number($("share-exp").value) : null;
     const code = $("share-code").value.trim() || null;
     try {
@@ -1034,9 +1036,24 @@ async function viewAlbums() {
       if (imgs.length > 0) covers[a.id] = imgs[0].blob_hash;
     } catch {}
   }
-  const list = albums.filter((a) => !searchQ || a.name.toLowerCase().includes(searchQ));
+  const list0 = albums.filter((a) => !searchQ || a.name.toLowerCase().includes(searchQ));
+  const sortMode = albumSort || "created-desc";
+  const list = [...list0].sort((a, b) => {
+    switch (sortMode) {
+      case "created-asc": return a.sort_order - b.sort_order;
+      case "name-asc": return a.name.localeCompare(b.name, "zh");
+      case "name-desc": return b.name.localeCompare(a.name, "zh");
+      default: return b.sort_order - a.sort_order;
+    }
+  });
   v.innerHTML = `
-    <div class="row"><h2 style="margin:6px 0">相册</h2><span style="flex:1"></span>
+    <div class="row"><h2 style="margin:6px 0">相册</h2><span class="badge">${list.length} 个</span><span style="flex:1"></span>
+      <label class="hint">排序 <select id="album-sort">
+        <option value="created-desc" ${sortMode === "created-desc" ? "selected" : ""}>创建时间 · 降序</option>
+        <option value="created-asc" ${sortMode === "created-asc" ? "selected" : ""}>创建时间 · 升序</option>
+        <option value="name-asc" ${sortMode === "name-asc" ? "selected" : ""}>名称 · 升序</option>
+        <option value="name-desc" ${sortMode === "name-desc" ? "selected" : ""}>名称 · 降序</option>
+      </select></label>
       <button class="primary" id="album-new"><svg class="ic"><use href="#i-folder-plus"/></svg>新建相册</button></div>
     <div class="album-wall" id="wall">
       ${list.map((a) => `
@@ -1077,6 +1094,7 @@ async function viewAlbums() {
       ]);
     };
   });
+  $("album-sort").onchange = (e) => { albumSort = e.target.value; route(); };
   $("album-new").onclick = () => {
     uiForm("新建相册", [{ id: "al-name", label: "相册名称" }], async (v2) => {
       if (!v2["al-name"].trim()) { toast("名称不能为空", true); return; }
@@ -1757,9 +1775,11 @@ async function viewAdminStorage() {
         </select>
         <input id="st-id" placeholder="名称（可选，默认自动）">
         <input id="st-root" placeholder="本地目录路径">
+        <button id="st-test">测试连接</button>
         <button class="primary" id="st-add">添加</button>
       </div>
       <div id="st-extra"></div>
+      <p class="hint" id="st-probe"></p>
     </div>`;
   const kindSel = $("st-kind");
   const renderExtra = () => {
@@ -1772,10 +1792,11 @@ async function viewAdminStorage() {
       openlist: `${f("st-endpoint", "base_url（http://…:5244）")}${f("st-token", "令牌（管理后台→个人资料→令牌）")}${f("st-base", "base_path（默认 /heartshard）")}`,
     }[k];
     $("st-root").style.display = k === "local" ? "inline-block" : "none";
+    $("st-probe").textContent = "";
   };
   renderExtra();
   kindSel.onchange = renderExtra;
-  $("st-add").onclick = async () => {
+  const buildStorageBody = () => {
     const k = kindSel.value;
     const body = { kind: k, id: $("st-id").value || null, root: $("st-root").value || null };
     if (k === "s3") Object.assign(body, {
@@ -1790,8 +1811,19 @@ async function viewAdminStorage() {
       Object.assign(body, { endpoint: $("st-endpoint").value, token: $("st-token").value });
       body.base_path = $("st-base").value || "/heartshard";
     }
+    return body;
+  };
+  // 测试连接（添加前探针；不落库）
+  $("st-test").onclick = async () => {
     try {
-      await api("/api/admin/storage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const r = await api("/api/admin/storage/probe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(buildStorageBody()) });
+      $("st-probe").textContent = r.ok ? `✓ ${r.msg}` : `✗ ${r.error}`;
+      $("st-probe").style.color = r.ok ? "var(--success)" : "var(--danger)";
+    } catch (e) { toast(e.message, true); }
+  };
+  $("st-add").onclick = async () => {
+    try {
+      await api("/api/admin/storage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(buildStorageBody()) });
       toast("Storage 已添加");
       route();
     } catch (e) { toast(e.message, true); }

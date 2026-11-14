@@ -1176,6 +1176,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/admin/storage", get(crate::storage::list_storage).post(crate::storage::add_storage))
         .route("/api/admin/storage/{id}", axum::routing::delete(crate::storage::remove_storage))
         .route("/api/admin/storage/verify", post(crate::storage::verify_storage))
+        .route("/api/admin/storage/probe", post(crate::storage::probe_storage))
         .route("/s/{id}", get(crate::share::share_page))
         .route("/s/{id}/meta", get(crate::share::share_meta))
         .route("/s/{id}/keys", get(crate::share::share_keys))
