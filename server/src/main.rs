@@ -136,7 +136,11 @@ fn main() {
             });
         }
 
-        let app = api::router().with_state(state);
+        // CORS：桌面客户端（tauri://localhost）与其它源的浏览器页面是跨域 fetch；
+        // API 由 token 保护，这里放行全部来源即可。
+        let app = api::router()
+            .with_state(state)
+            .layer(tower_http::cors::CorsLayer::permissive());
         let addr = format!("0.0.0.0:{}", cfg.port);
         eprintln!("牧心后台监听 http://{addr}");
         let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
