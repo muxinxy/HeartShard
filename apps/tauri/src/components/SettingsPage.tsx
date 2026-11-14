@@ -174,6 +174,18 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
             ))}
           </select>
         </label>
+        <label className="setting-row">
+          <span>高德 Web 服务 Key（逆地理编码：把地点坐标显示为城市名，可选）</span>
+          <input
+            value={localStorage.getItem("hs_amap_key") || ""}
+            onChange={(e) => {
+              localStorage.setItem("hs_amap_key", e.target.value.trim());
+              setSettings((s) => (s ? { ...s } : s));
+            }}
+            placeholder="高德开放平台申请（类型选 Web 服务）"
+            style={{ width: 280 }}
+          />
+        </label>
         <p className="hint">
           主题与地图源保存在本机。高德 / Esri 瓦片无需密钥；百度地图因私有投影（BD-09）暂未内置，如需支持请反馈。
         </p>

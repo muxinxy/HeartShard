@@ -333,7 +333,8 @@ h1, h2, h3 { color: var(--foreground); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
 
 /* ---------- 详情模态 ---------- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: center; z-index: 500; }
+/* z-index 2000：高于灯箱（1000），灯箱里打开的弹窗不会被预览层盖住 */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: center; z-index: 2000; }
 .modal { width: 680px; max-width: 94vw; max-height: 86vh; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px 28px; color: var(--card-foreground); }
 .modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 .modal-head .name { font-weight: 700; font-size: 17px; }
@@ -1216,4 +1217,44 @@ button.danger { color: var(--destructive); }
 .status-card h3 { margin: 0 0 10px; font-size: 15px; }
 @media (max-width: 900px) {
   .status-charts { grid-template-columns: 1fr; }
+}
+
+/* ---------- 返回按钮 ---------- */
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--input);
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+.back-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+/* ---------- 地图缩略图簇 ---------- */
+.thumb-cluster { background: none; border: none; }
+.leaflet-container .leaflet-attribution-flag { line-height: 0; }
+.leaflet-container { font-family: inherit; }
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.6) !important;
+  font-size: 10px;
+}
+
+/* ---------- rc-slider-captcha 主题对齐 ---------- */
+.captcha-wrap {
+  --rcsc-primary: var(--primary);
+  --rcsc-primary-light: color-mix(in srgb, var(--primary) 30%, transparent);
+  --rcsc-success: var(--success);
+  --rcsc-success-light: color-mix(in srgb, var(--success) 30%, transparent);
+  --rcsc-border-color: var(--border);
+  --rcsc-bg-color: var(--input);
+  --rcsc-text-color: var(--muted);
+  --rcsc-button-color: var(--primary);
+  --rcsc-button-hover-color: color-mix(in srgb, var(--primary) 85%, #fff);
+  --rcsc-button-bg-color: var(--card);
+  --rcsc-control-border-radius: 10px;
+  margin: 14px 0 4px;
 }

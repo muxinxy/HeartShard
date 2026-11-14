@@ -7,7 +7,6 @@ import { CtxMenu, type MenuItem } from "../CtxMenu";
 import { usePhotoActions } from "../PhotoActions";
 import { Ic } from "../icons";
 import { useToast } from "../Toast";
-import { AlbumTree } from "../AlbumTree";
 
 export function AlbumsView({ albumId, searchQ }: { albumId: string | null; searchQ: string }) {
   const actions = usePhotoActions();
@@ -30,9 +29,12 @@ function AlbumWall({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const [manageOpen, setManageOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number; album: AlbumInfo } | null>(null);
   const [aclAlbum, setAclAlbum] = useState<AlbumInfo | null>(null);
+  const [coverAlbum, setCoverAlbum] = useState<AlbumInfo | null>(null);
+  const [renameOpen, setRenameOpen] = useState<{ album: AlbumInfo; name: string } | null>(null);
+  // 排序：创建时间（默认）/ 名称 × 升降序
+  const [sortMode, setSortMode] = useState("created-desc");
 
   const reload = useCallback(() => {
     api
@@ -62,8 +64,23 @@ function AlbumWall({
 
   const filtered = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
-    return q ? albums.filter((a) => a.name.toLowerCase().includes(q)) : albums;
-  }, [albums, searchQ]);
+    const base = q ? albums.filter((a) => a.name.toLowerCase().includes(q)) : [...albums];
+    switch (sortMode) {
+      case "created-desc":
+        base.sort((a, b) => b.sort_order - a.sort_order);
+        break;
+      case "created-asc":
+        base.sort((a, b) => a.sort_order - b.sort_order);
+        break;
+      case "name-asc":
+        base.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+        break;
+      case "name-desc":
+        base.sort((a, b) => b.name.localeCompare(a.name, "zh"));
+        break;
+    }
+    return base;
+  }, [albums, searchQ, sortMode]);
 
   const openAlbum = (id: string) => (window.location.hash = `#/album-${id}`);
 
@@ -100,14 +117,32 @@ function AlbumWall({
 
   const albumMenu = (a: AlbumInfo): MenuItem[] => [
     { label: "打开相册", icon: "i-albums", onClick: () => openAlbum(a.id) },
+    { label: "修改封面", icon: "i-image", onClick: () => setCoverAlbum(a) },
     ...(platform.isRemote
       ? [
           { label: "分享相册", icon: "i-shares", onClick: () => actions.shareAlbum(a) },
           { label: "权限", icon: "i-users", onClick: () => setAclAlbum(a) },
         ]
       : []),
+    { label: "重命名", icon: "i-edit", onClick: () => renameAlbum(a) },
     { label: "删除相册", icon: "i-trash", danger: true, onClick: () => deleteAlbum(a) },
   ];
+
+  const renameAlbum = (a: AlbumInfo) => {
+    setRenameOpen({ album: a, name: a.name });
+  };
+
+  const doRename = async () => {
+    if (!renameOpen || !renameOpen.name.trim()) return;
+    try {
+      await api.albumRename(renameOpen.album.id, renameOpen.name.trim());
+      toast.success("已重命名");
+      setRenameOpen(null);
+      reload();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
 
   const toggleAlbum = (id: string) => {
     setSelected((prev) => {
@@ -124,11 +159,15 @@ function AlbumWall({
         <h2>相册</h2>
         <span className="badge">{filtered.length} 个</span>
         <span style={{ flex: 1 }} />
-        {!platform.isRemote && (
-          <button onClick={() => setManageOpen(true)}>
-            <Ic name="i-edit" /> 排序 / 封面
-          </button>
-        )}
+        <label className="hint">
+          排序
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
+            <option value="created-desc">创建时间 · 降序</option>
+            <option value="created-asc">创建时间 · 升序</option>
+            <option value="name-asc">名称 · 升序</option>
+            <option value="name-desc">名称 · 降序</option>
+          </select>
+        </label>
         <button className="primary" onClick={() => setCreateOpen(true)}>
           <Ic name="i-folder-plus" /> 新建相册
         </button>
@@ -237,13 +276,86 @@ function AlbumWall({
         </div>
       )}
 
-      {/* 本地：排序 / 封面管理 */}
-      {manageOpen && <AlbumTree onDone={() => { setManageOpen(false); reload(); }} />}
+      {/* 重命名相册 */}
+      {renameOpen && (
+        <div className="modal-backdrop" onClick={() => setRenameOpen(null)}>
+          <div className="modal" style={{ width: 400 }} onClick={(e) => e.stopPropagation()}>
+            <h3>重命名相册</h3>
+            <input
+              autoFocus
+              value={renameOpen.name}
+              onChange={(e) => setRenameOpen({ ...renameOpen, name: e.target.value })}
+              onKeyDown={(e) => e.key === "Enter" && doRename()}
+              style={{ width: "100%" }}
+            />
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={() => setRenameOpen(null)}>取消</button>
+              <button className="primary" onClick={doRename} disabled={!renameOpen.name.trim()}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 修改封面：从相册内照片中选一张 */}
+      {coverAlbum && <CoverPicker album={coverAlbum} onClose={() => setCoverAlbum(null)} />}
 
       {ctx && <CtxMenu pos={{ x: ctx.x, y: ctx.y }} items={albumMenu(ctx.album)} onClose={() => setCtx(null)} />}
       {aclAlbum && <AclEditor album={aclAlbum} onClose={() => setAclAlbum(null)} />}
     </div>
   );
+}
+
+// ---------------- 修改封面（右键相册 → 修改封面；从相册内照片中选） ----------------
+
+function CoverPicker({ album, onClose }: { album: AlbumInfo; onClose: () => void }) {
+  const toast = useToast();
+  const [blobs, setBlobs] = useState<BlobEntry[]>([]);
+
+  useEffect(() => {
+    api
+      .listAlbumBlobs(album.id)
+      .then((list) => setBlobs(list.filter((b) => b.mime.startsWith("image/"))))
+      .catch((e) => toast.error(String(e)));
+  }, [album.id, toast]);
+
+  const pick = async (hash: string) => {
+    try {
+      await api.albumSetCover(album.id, hash);
+      toast.success(`「${album.name}」封面已更新`);
+      onClose();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
+        <h3>修改封面 · {album.name}</h3>
+        {blobs.length === 0 ? (
+          <p className="hint">相册内还没有照片，无法设置封面。</p>
+        ) : (
+          <div className="grid" style={{ maxHeight: "60vh", overflowY: "auto", marginTop: 10 }}>
+            {blobs.map((b) => (
+              <div key={b.blob_hash} className="cell" onClick={() => pick(b.blob_hash)} title={b.file_name}>
+                <CoverThumb hash={b.blob_hash} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CoverThumb({ hash }: { hash: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    api.thumbnailUrl(hash).then(setSrc).catch(() => {});
+  }, [hash]);
+  return src ? <img src={src} alt="" /> : <div className="thumb-placeholder">🖼</div>;
 }
 
 function ThumbCover({ hash }: { hash: string }) {
@@ -310,7 +422,7 @@ function AlbumDetail({ albumId }: { albumId: string }) {
   return (
     <div>
       <div className="view-head">
-        <a className="hint" style={{ cursor: "pointer" }} onClick={() => (window.location.hash = "#/albums")}>
+        <a className="back-btn" onClick={() => (window.location.hash = "#/albums")}>
           ← 返回相册
         </a>
         <h2>{album?.name ?? "相册"}</h2>

@@ -6,6 +6,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod meta;
+pub mod ratelimit;
 pub mod share;
 pub mod storage;
 pub mod totp;

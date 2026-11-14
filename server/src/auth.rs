@@ -250,23 +250,43 @@ impl UserStore {
         self.meta.save_user(user)
     }
 
-    /// 启用 2fa：生成密钥（暂存 users 表，confirm 前不生效——直接生效简化 v1）。
+    /// 生成 2fa 密钥（仅返回，不落库——确认验证码前不生效，登录不要求验证码）。
     pub fn setup_totp(&self, uid: &str) -> Result<crate::totp::TotpSetup, String> {
         let secret = crate::totp::generate_secret();
-        let mut users = self.meta.list_users()?;
-        let user = users.iter_mut().find(|u| u.uid == uid).ok_or("用户不存在")?;
-        user.totp_secret = secret.clone();
-        self.meta.save_user(user)?;
+        let users = self.meta.list_users()?;
+        let user = users.iter().find(|u| u.uid == uid).ok_or("用户不存在")?;
         Ok(crate::totp::TotpSetup {
             uri: crate::totp::otpauth_uri(&secret, &user.name, "牧心相册"),
             secret,
         })
     }
 
+    /// 确认启用 2fa：校验验证码通过后才落库生效。
+    pub fn enable_totp(&self, uid: &str, secret: &str, code: &str) -> Result<(), String> {
+        if !crate::totp::verify(secret, code) {
+            return Err("验证码错误，未启用".into());
+        }
+        let mut users = self.meta.list_users()?;
+        let user = users.iter_mut().find(|u| u.uid == uid).ok_or("用户不存在")?;
+        user.totp_secret = secret.to_string();
+        self.meta.save_user(user)
+    }
+
     /// 关闭 2fa。
     pub fn disable_totp(&self, uid: &str) -> Result<(), String> {
         let mut users = self.meta.list_users()?;
         let user = users.iter_mut().find(|u| u.uid == uid).ok_or("用户不存在")?;
+        user.totp_secret = String::new();
+        self.meta.save_user(user)
+    }
+
+    /// 按用户名关闭 2fa（CLI 救援：验证器丢失时 `--reset-totp <用户名>`）。
+    pub fn reset_totp_by_name(&self, name: &str) -> Result<(), String> {
+        let mut users = self.meta.list_users()?;
+        let user = users
+            .iter_mut()
+            .find(|u| u.name == name || u.uid == name)
+            .ok_or("用户不存在")?;
         user.totp_secret = String::new();
         self.meta.save_user(user)
     }

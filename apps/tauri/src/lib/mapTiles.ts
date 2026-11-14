@@ -60,3 +60,23 @@ export function currentMapSource(): MapSource {
 export function setMapSource(id: string) {
   localStorage.setItem(KEY, id);
 }
+
+// ---------------- 逆地理编码（高德，可选；Key 在设置页填写） ----------------
+
+const geoCache = new Map<string, string>();
+
+/** 经纬度 → 城市/区县名；未配 Key 或失败时返回 null（调用方回退坐标显示）。 */
+export async function placeLabel(lat: number, lon: number): Promise<string | null> {
+  const key = localStorage.getItem("hs_amap_key");
+  if (!key) return null;
+  const k = `${lat.toFixed(2)},${lon.toFixed(2)}`;
+  if (geoCache.has(k)) return geoCache.get(k) ?? null;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const name = await invoke<string>("geocode_regeo", { key, lng: lon, lat });
+    if (name) geoCache.set(k, name);
+    return name || null;
+  } catch {
+    return null;
+  }
+}

@@ -2785,3 +2785,77 @@ impl HeartCore {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------- 存储探针 / 逆地理编码
+
+/// 存储连通性探针：按配置临时构造适配器并列举根目录（不落库、不入 HeartCore）。
+/// `config` 为对应 Storage 配置的 JSON（与 add_storage_* 的字段一致）。
+pub fn probe_storage(kind: &str, config: serde_json::Value) -> Result<String, String> {
+    use index::store::BlobStore;
+    let parse = |e: serde_json::Error| format!("配置解析失败：{e}");
+    let store: Box<dyn BlobStore> = match kind {
+        "local" => {
+            let root = config
+                .get("root")
+                .and_then(|r| r.as_str())
+                .ok_or("缺少 root 字段")?
+                .to_string();
+            if !std::path::Path::new(&root).is_dir() {
+                return Err(format!("目录不存在：{root}"));
+            }
+            return Ok(format!("目录可达：{root}"));
+        }
+        "s3" => Box::new(
+            S3Store::new(serde_json::from_value(config).map_err(parse)?)
+                .map_err(|e| e.to_string())?,
+        ),
+        "openlist" => Box::new(
+            OpenListStore::new(serde_json::from_value(config).map_err(parse)?)
+                .map_err(|e| e.to_string())?,
+        ),
+        "webdav" => Box::new(
+            WebDavStore::new(serde_json::from_value(config).map_err(parse)?)
+                .map_err(|e| e.to_string())?,
+        ),
+        "ftp" => Box::new(
+            FtpStore::new(serde_json::from_value(config).map_err(parse)?)
+                .map_err(|e| e.to_string())?,
+        ),
+        _ => return Err(format!("未知存储类型：{kind}")),
+    };
+    let n = store
+        .list("")
+        .map_err(|e| format!("连接失败：{e}"))?
+        .len();
+    Ok(format!("连通正常（根目录 {n} 项）"))
+}
+
+/// 高德逆地理编码：经纬度 → 城市/区县名（REST 服务，需要 Web服务类型 Key）。
+/// 网络失败或配额超限时返回 Err，调用方回退为坐标显示。
+pub fn amap_regeo(key: &str, lng: f64, lat: f64) -> Result<String, String> {
+    let url = format!(
+        "https://restapi.amap.com/v3/geocode/regeo?key={key}&location={lng:.6},{lat:.6}&extensions=base"
+    );
+    let body: serde_json::Value = serde_json::from_str(
+        &reqwest::blocking::get(&url)
+            .map_err(|e| format!("网络请求失败：{e}"))?
+            .text()
+            .map_err(|e| format!("读取响应失败：{e}"))?,
+    )
+    .map_err(|e| format!("响应解析失败：{e}"))?;
+    if body["status"] != "1" {
+        return Err(body["info"].as_str().unwrap_or("逆地理编码失败").to_string());
+    }
+    let comp = &body["regeocode"]["addressComponent"];
+    let city = comp["city"].as_str().unwrap_or("");
+    let district = comp["district"].as_str().unwrap_or("");
+    if !city.is_empty() {
+        Ok(if district.is_empty() {
+            city.to_string()
+        } else {
+            format!("{city} · {district}")
+        })
+    } else {
+        Ok(comp["province"].as_str().unwrap_or("").to_string())
+    }
+}

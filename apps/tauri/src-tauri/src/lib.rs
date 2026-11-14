@@ -83,6 +83,8 @@ pub fn run() {
             commands::album_create,
             commands::album_rename,
             commands::album_delete,
+            commands::probe_storage,
+            commands::geocode_regeo,
             commands::album_set_sort,
             commands::album_set_cover,
             commands::list_album_blobs,

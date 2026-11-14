@@ -31,6 +31,37 @@ fn main() {
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
+    // 救援：--reset-totp <用户名> —— 关闭该用户的两步验证（验证器丢失时）
+    if let Some(pos) = args.iter().position(|a| a == "--reset-totp") {
+        let name = args.get(pos + 1).cloned().unwrap_or_default();
+        if name.is_empty() {
+            eprintln!("用法：heartshard-server --reset-totp <用户名>");
+            std::process::exit(2);
+        }
+        let meta_store = match meta::open_meta(&cfg, &server_root) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("错误：{e}");
+                std::process::exit(2);
+            }
+        };
+        let users = match UserStore::init(meta_store, &cfg) {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("错误：{e}");
+                std::process::exit(2);
+            }
+        };
+        match users.reset_totp_by_name(&name) {
+            Ok(()) => eprintln!("已关闭用户 {name} 的两步验证"),
+            Err(e) => {
+                eprintln!("错误：{e}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     // 解锁共享库：环境变量口令；未设置时交互输入
     let password = match std::env::var(&cfg.library.password_env) {
         Ok(p) => p,
@@ -144,6 +175,11 @@ fn main() {
         let addr = format!("0.0.0.0:{}", cfg.port);
         eprintln!("牧心后台监听 http://{addr}");
         let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
-        axum::serve(listener, app).await.expect("serve");
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .expect("serve");
     });
 }

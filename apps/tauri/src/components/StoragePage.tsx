@@ -1,7 +1,9 @@
-// §10 存储管理：列表 / 新增本地目录 / S3 / OpenList / 删除。
-import { useCallback, useEffect, useState } from "react";
+// §10 存储管理：列表 / 新增本地目录 / S3 / OpenList / WebDAV / FTPS。
+// 每种类型支持「测试连接」——探针通过后才允许添加；OpenList 使用令牌（Token）。
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, StorageStatus } from "../lib/api";
+import { useToast } from "./Toast";
 
 type AddMode = "none" | "local" | "s3" | "openlist" | "webdav" | "ftp";
 
@@ -14,10 +16,13 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function StoragePage({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
   const [storages, setStorages] = useState<StorageStatus[]>([]);
   const [mode, setMode] = useState<AddMode>("none");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [probeMsg, setProbeMsg] = useState<string | null>(null);
+  const [probeOk, setProbeOk] = useState(false);
 
   // S3 表单
   const [s3Endpoint, setS3Endpoint] = useState("");
@@ -27,10 +32,9 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
   const [s3Region, setS3Region] = useState("us-east-1");
   const [s3PathStyle, setS3PathStyle] = useState(true);
 
-  // OpenList 表单
+  // OpenList 表单（令牌优先；兼容可选账密）
   const [olUrl, setOlUrl] = useState("");
-  const [olUser, setOlUser] = useState("");
-  const [olPass, setOlPass] = useState("");
+  const [olToken, setOlToken] = useState("");
   const [olPath, setOlPath] = useState("/heartshard");
 
   // WebDAV 表单
@@ -57,6 +61,79 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // 当前表单的探针配置（config → probeStorage / add*）
+  const formConfig = useMemo<Record<string, unknown> | null>(() => {
+    switch (mode) {
+      case "s3":
+        return { endpoint: s3Endpoint, bucket: s3Bucket, access_key: s3Key, secret_key: s3Secret, region: s3Region, path_style: s3PathStyle };
+      case "openlist":
+        return { base_url: olUrl, token: olToken, base_path: olPath };
+      case "webdav":
+        return { base_url: wdUrl, username: wdUser, password: wdPass };
+      case "ftp":
+        return { host: ftpHost, port: Number(ftpPort) || 990, username: ftpUser, password: ftpPass, secure: ftpSecure, base_path: ftpPath };
+      default:
+        return null;
+    }
+  }, [mode, s3Endpoint, s3Bucket, s3Key, s3Secret, s3Region, s3PathStyle, olUrl, olToken, olPath, wdUrl, wdUser, wdPass, ftpHost, ftpPort, ftpUser, ftpPass, ftpSecure, ftpPath]);
+
+  const formConfigJson = formConfig ? JSON.stringify(formConfig) : "";
+
+  const resetProbe = () => {
+    setProbeMsg(null);
+    setProbeOk(false);
+  };
+  // 任意字段变更后需重新测试
+  useEffect(() => {
+    resetProbe();
+  }, [formConfigJson]);
+
+  const doTest = async () => {
+    if (!formConfig) return;
+    setBusy(true);
+    try {
+      const msg = await api.probeStorage(mode, formConfig);
+      setProbeMsg(`✓ ${msg}`);
+      setProbeOk(true);
+    } catch (e) {
+      setProbeMsg(`✗ ${String(e)}`);
+      setProbeOk(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doAdd = async () => {
+    if (!formConfig || !probeOk) return;
+    setBusy(true);
+    setError(null);
+    try {
+      switch (mode) {
+        case "s3":
+          await api.addStorageS3(formConfig);
+          break;
+        case "openlist":
+          await api.addStorageOpenList(formConfig);
+          break;
+        case "webdav":
+          await api.addStorageWebdav(formConfig);
+          break;
+        case "ftp":
+          await api.addStorageFtp(formConfig);
+          break;
+        default:
+          return;
+      }
+      toast.success("存储已添加");
+      setMode("none");
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doPickDir = async () => {
     const picked = await open({ directory: true, title: "选择本地存储目录" });
     if (!picked || typeof picked !== "string") return;
@@ -64,85 +141,6 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       await api.addStorageLocal(id, picked);
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doAddS3 = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.addStorageS3({
-        endpoint: s3Endpoint,
-        bucket: s3Bucket,
-        access_key: s3Key,
-        secret_key: s3Secret,
-        region: s3Region,
-        path_style: s3PathStyle,
-      });
-      setMode("none");
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doAddOpenList = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.addStorageOpenList({
-        base_url: olUrl,
-        username: olUser,
-        password: olPass,
-        base_path: olPath,
-      });
-      setMode("none");
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doAddWebdav = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.addStorageWebdav({
-        base_url: wdUrl,
-        username: wdUser,
-        password: wdPass,
-      });
-      setMode("none");
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doAddFtp = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.addStorageFtp({
-        host: ftpHost,
-        port: Number(ftpPort) || 990,
-        username: ftpUser,
-        password: ftpPass,
-        secure: ftpSecure,
-        base_path: ftpPath,
-      });
-      setMode("none");
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -165,6 +163,25 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
       setBusy(false);
     }
   };
+
+  const TestAddButtons = ({ addLabel }: { addLabel: string }) => (
+    <>
+      <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
+        <button onClick={doTest} disabled={busy || !formConfigJson || formConfigJson === "{}"}>
+          测试连接
+        </button>
+        <button className="primary" onClick={doAdd} disabled={busy || !probeOk} title={probeOk ? undefined : "请先通过「测试连接」"}>
+          {addLabel}
+        </button>
+      </div>
+      {probeMsg && (
+        <p className={probeOk ? "hint" : "error"} style={{ marginTop: 8 }}>
+          {probeMsg}
+        </p>
+      )}
+      {!probeOk && !probeMsg && <p className="hint" style={{ marginTop: 8 }}>点击「测试连接」通过后才能添加。</p>}
+    </>
+  );
 
   return (
     <div className="wizard">
@@ -221,10 +238,7 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
             <input value={s3Region} onChange={(e) => setS3Region(e.target.value)} /></label>
           <label className="setting-row"><span>Path Style（MinIO/R2 勾选）</span>
             <input type="checkbox" checked={s3PathStyle} onChange={(e) => setS3PathStyle(e.target.checked)} /></label>
-          <button className="primary" onClick={doAddS3} disabled={busy || !s3Endpoint || !s3Bucket}>
-            添加 S3 Storage
-          </button>
-          <p className="hint">添加前可先用 s3-verify 工具验证连通性。</p>
+          <TestAddButtons addLabel="添加 S3 Storage" />
         </div>
       )}
 
@@ -232,15 +246,12 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
         <div className="settings-card">
           <label className="setting-row"><span>Base URL</span>
             <input value={olUrl} onChange={(e) => setOlUrl(e.target.value)} placeholder="http://127.0.0.1:5244" /></label>
-          <label className="setting-row"><span>用户名</span>
-            <input value={olUser} onChange={(e) => setOlUser(e.target.value)} /></label>
-          <label className="setting-row"><span>密码</span>
-            <input type="password" value={olPass} onChange={(e) => setOlPass(e.target.value)} /></label>
+          <label className="setting-row"><span>令牌 Token</span>
+            <input type="password" value={olToken} onChange={(e) => setOlToken(e.target.value)} placeholder="OpenList 管理后台「个人资料 → 令牌」生成" /></label>
           <label className="setting-row"><span>基础路径</span>
             <input value={olPath} onChange={(e) => setOlPath(e.target.value)} placeholder="/heartshard" /></label>
-          <button className="primary" onClick={doAddOpenList} disabled={busy || !olUrl}>
-            添加 OpenList Storage
-          </button>
+          <TestAddButtons addLabel="添加 OpenList Storage" />
+          <p className="hint">使用令牌认证（与网页端一致）；不再使用用户名密码。</p>
         </div>
       )}
 
@@ -252,9 +263,7 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
             <input value={wdUser} onChange={(e) => setWdUser(e.target.value)} /></label>
           <label className="setting-row"><span>密码</span>
             <input type="password" value={wdPass} onChange={(e) => setWdPass(e.target.value)} /></label>
-          <button className="primary" onClick={doAddWebdav} disabled={busy || !wdUrl}>
-            添加 WebDAV Storage
-          </button>
+          <TestAddButtons addLabel="添加 WebDAV Storage" />
           <p className="hint">兼容 nginx dav / Nextcloud / Alist / OpenList 的 WebDAV 入口（Basic 认证）。</p>
         </div>
       )}
@@ -273,9 +282,7 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
             <input type="checkbox" checked={ftpSecure} onChange={(e) => setFtpSecure(e.target.checked)} /></label>
           <label className="setting-row"><span>基础路径</span>
             <input value={ftpPath} onChange={(e) => setFtpPath(e.target.value)} placeholder="/heartshard" /></label>
-          <button className="primary" onClick={doAddFtp} disabled={busy || !ftpHost}>
-            添加 FTPS Storage
-          </button>
+          <TestAddButtons addLabel="添加 FTPS Storage" />
           <p className="hint">仅支持 FTPS；明文 FTP 因凭据明文传输默认禁用。</p>
         </div>
       )}

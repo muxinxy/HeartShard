@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MapContainer, CircleMarker, TileLayer } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { api, BlobEntry, platform } from "../../lib/api";
-import { currentMapSource } from "../../lib/mapTiles";
+import { currentMapSource, placeLabel } from "../../lib/mapTiles";
 import { PhotoGrid } from "../PhotoGrid";
 import { usePhotoActions } from "../PhotoActions";
 import { Ic } from "../icons";
@@ -59,11 +59,36 @@ export function ExploreView() {
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [blobs]);
 
+  // 地点标签：配了高德 Key 时显示城市/区县名（否则显示坐标）
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, string> = {};
+      for (const [key, items] of places.slice(0, 20)) {
+        const lat = items.reduce((s, b) => s + (b.gps_lat ?? 0), 0) / items.length;
+        const lon = items.reduce((s, b) => s + (b.gps_lon ?? 0), 0) / items.length;
+        const name = await placeLabel(lat, lon);
+        if (name) out[key] = name;
+      }
+      if (!cancelled && Object.keys(out).length > 0) setLabels(out);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [places]);
+
+  const goMap = (key: string) => {
+    sessionStorage.setItem("map_place", key);
+    window.location.hash = "#/map";
+  };
+  const label = (key: string) => (labels[key] ? `📍 ${labels[key]}` : `📍 ${key}`);
+
   if (open) {
     return (
       <div>
         <div className="view-head">
-          <a className="hint" style={{ cursor: "pointer" }} onClick={() => setOpen(null)}>
+          <a className="back-btn" onClick={() => setOpen(null)}>
             ← 返回探索
           </a>
           <h2>{open.title}</h2>
@@ -81,14 +106,6 @@ export function ExploreView() {
     <div>
       <div className="view-head">
         <h2>探索</h2>
-        {!platform.isRemote && (
-          <span style={{ flex: 1 }} />
-        )}
-        {!platform.isRemote && (
-          <button onClick={() => (window.location.hash = "#/map")}>
-            <Ic name="i-map" /> 地图
-          </button>
-        )}
       </div>
 
       <h3 style={{ fontSize: 15, color: "var(--muted)" }}>类别</h3>
@@ -108,7 +125,7 @@ export function ExploreView() {
             const lon = items.reduce((s, b) => s + (b.gps_lon ?? 0), 0) / items.length;
             const src = currentMapSource();
             return (
-              <div key={key} className="explore-card" onClick={() => setOpen({ title: key, blobs: items })}>
+              <div key={key} className="explore-card" onClick={() => goMap(key)}>
                 <div style={{ height: 120, background: "var(--input)" }}>
                   <MapContainer
                     center={[lat, lon]}
@@ -129,7 +146,7 @@ export function ExploreView() {
                   </MapContainer>
                 </div>
                 <div className="nm">
-                  <span>📍 {key}</span>
+                  <span>{label(key)}</span>
                   <span className="cnt">{items.length}</span>
                 </div>
               </div>

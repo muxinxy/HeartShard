@@ -120,9 +120,22 @@ pub struct LoginReq {
     pub totp_code: Option<String>,
 }
 
-pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
+pub async fn login(
+    State(state): S,
+    crate::ratelimit::ClientIp(ip): crate::ratelimit::ClientIp,
+    Json(req): Json<LoginReq>,
+) -> Response {
+    // 登录限流：同一 IP 连续失败 5 次后锁定 10 分钟
+    if let Err(wait) = crate::ratelimit::check(ip) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({ "error": format!("尝试次数过多，请等待 {wait} 秒后重试") })),
+        )
+            .into_response();
+    }
     match state.users.login(&req.name, &req.password, req.totp_code.as_deref()) {
         Ok((token, user, totp_required)) => {
+            crate::ratelimit::record_ok(ip);
             eprintln!("[auth] 登录成功 user={} uid={} admin={}", user.name, user.uid, user.is_admin);
             Json(serde_json::json!({
                 "token": token,
@@ -137,12 +150,14 @@ pub async fn login(State(state): S, Json(req): Json<LoginReq>) -> Response {
         Err(e) => {
             eprintln!("[auth] 登录失败 user={}: {e}", req.name);
             if e == "__TOTP_REQUIRED__" {
+                // 缺验证码不算攻击失败，不计数
                 return (
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({ "error": "请输入两步验证码", "totp_required": true })),
                 )
                     .into_response();
             }
+            crate::ratelimit::record_fail(ip);
             err(StatusCode::UNAUTHORIZED, e)
         }
     }
@@ -170,7 +185,7 @@ pub async fn change_own_password(
     }
 }
 
-/// POST /api/me/totp/setup —— 生成 2fa 密钥并启用（返回 otpauth URI + secret）。
+/// POST /api/me/totp/setup —— 生成 2fa 密钥（仅返回 otpauth URI + secret；确认前不生效）。
 pub async fn totp_setup(State(state): S, headers: HeaderMap) -> Response {
     let user = match auth(&state, &headers) {
         Ok(u) => u,
@@ -178,6 +193,24 @@ pub async fn totp_setup(State(state): S, headers: HeaderMap) -> Response {
     };
     match state.users.setup_totp(&user.uid) {
         Ok(setup) => Json(setup).into_response(),
+        Err(e) => s_err(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct TotpEnableReq {
+    pub secret: String,
+    pub code: String,
+}
+
+/// POST /api/me/totp/enable —— 校验验证码通过后启用 2fa。
+pub async fn totp_enable(State(state): S, headers: HeaderMap, Json(req): Json<TotpEnableReq>) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    match state.users.enable_totp(&user.uid, &req.secret, &req.code) {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => s_err(e),
     }
 }
@@ -1108,6 +1141,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/me", get(me))
         .route("/api/me/password", post(change_own_password))
         .route("/api/me/totp/setup", post(totp_setup))
+        .route("/api/me/totp/enable", post(totp_enable))
         .route("/api/me/totp/disable", post(totp_disable))
         .route("/favicon.ico", get(favicon))
         .route("/favicon.svg", get(favicon))

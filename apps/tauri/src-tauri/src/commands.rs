@@ -41,11 +41,93 @@ pub fn session_status(state: State<'_, SessionState>) -> SessionStatus {
     SessionStatus { unlocked: state.core.lock().unwrap().is_unlocked() }
 }
 
+// 本机解锁限流：连续失败 5 次后拒绝尝试并要求等待（进程内计数，成功清零）。
+const LOCK_MAX_FAILS: u32 = 5;
+const LOCK_LOCKOUT_SECS: u64 = 60;
+const LOCK_WINDOW_SECS: u64 = 60;
+
+#[derive(Default)]
+struct LockState {
+    fails: u32,
+    window_start: Option<std::time::Instant>,
+    lock_until: Option<std::time::Instant>,
+}
+
+fn lockout_state() -> &'static std::sync::Mutex<LockState> {
+    use std::sync::Mutex;
+    static STATE: Mutex<LockState> = Mutex::new(LockState { fails: 0, window_start: None, lock_until: None });
+    &STATE
+}
+
+fn lockout_check() -> Result<(), String> {
+    use std::time::Instant;
+    let mut st = lockout_state().lock().unwrap();
+    if let Some(until) = st.lock_until {
+        let now = Instant::now();
+        if until > now {
+            let remain = until.duration_since(now).as_secs().max(1);
+            return Err(format!("尝试次数过多，请等待 {remain} 秒后再试"));
+        }
+        st.lock_until = None;
+        st.fails = 0;
+        st.window_start = None;
+    }
+    Ok(())
+}
+
+fn lockout_record_fail() {
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let mut st = lockout_state().lock().unwrap();
+    // 60 秒窗口过期则重新计数
+    if let Some(t) = st.window_start {
+        if now.duration_since(t).as_secs() > LOCK_WINDOW_SECS {
+            st.fails = 0;
+            st.window_start = None;
+        }
+    }
+    st.fails += 1;
+    if st.window_start.is_none() {
+        st.window_start = Some(now);
+    }
+    if st.fails >= LOCK_MAX_FAILS {
+        st.lock_until = Some(now + Duration::from_secs(LOCK_LOCKOUT_SECS));
+        st.fails = 0;
+        st.window_start = None;
+    }
+}
+
+fn lockout_record_ok() {
+    *lockout_state().lock().unwrap() = LockState::default();
+}
+
 #[tauri::command]
 pub fn unlock(password: String, state: State<'_, SessionState>) -> Result<SessionStatus, String> {
+    lockout_check()?;
     let mut core = state.core.lock().unwrap();
-    core.unlock(&password).map_err(err_str)?;
-    Ok(SessionStatus { unlocked: true })
+    match core.unlock(&password) {
+        Ok(_) => {
+            lockout_record_ok();
+            Ok(SessionStatus { unlocked: true })
+        }
+        Err(e) => {
+            drop(core);
+            lockout_record_fail();
+            Err(err_str(e))
+        }
+    }
+}
+
+/// 存储连通性探针（添加前「测试连接」；不落库）。
+#[tauri::command]
+pub fn probe_storage(kind: String, config: serde_json::Value) -> Result<String, String> {
+    heart_core::probe_storage(&kind, config)
+}
+
+/// 高德逆地理编码（经纬度 → 城市/区县；key 来自设置页）。
+#[tauri::command]
+pub fn geocode_regeo(key: String, lng: f64, lat: f64) -> Result<String, String> {
+    heart_core::amap_regeo(&key, lng, lat)
 }
 
 #[tauri::command]

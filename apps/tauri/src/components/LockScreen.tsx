@@ -1,10 +1,11 @@
 // 锁屏 / 登录（网页端同款）：双模式切换；远端登录带滑动验证码（rc-slider-captcha）+ TOTP 两步验证。
-import { useState } from "react";
+import { useRef, useState } from "react";
 import SliderCaptcha from "rc-slider-captcha";
 import { api, currentMode, remoteUrl, setMode, TotpRequiredError, type ApiMode } from "../lib/api";
 
 export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [mode, setUiMode] = useState<ApiMode>(currentMode());
+  const captchaRef = useRef<HTMLDivElement>(null);
   const [password, setPassword] = useState("");
   const [serverUrl, setServerUrl] = useState(remoteUrl() || "http://localhost:8420");
   const [username, setUsername] = useState("");
@@ -117,15 +118,22 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
           />
         )}
         {mode === "remote" && (
-          <div className="captcha-wrap">
+          <div className="captcha-wrap" ref={captchaRef}>
             <SliderCaptcha
               key={`${mode}-${needTotp}`}
               mode="slider"
               autoRequest={false}
-              onVerify={() =>
-                new Promise<void>((resolve) => {
-                  setSliderDone(true);
-                  resolve();
+              onVerify={(data) =>
+                new Promise<void>((resolve, reject) => {
+                  // 人机判定：拖动距离 ≥ 轨道 85% 且持续 ≥ 300ms，否则弹回重试
+                  const w = captchaRef.current?.clientWidth ?? 0;
+                  if (w > 0 && data.x >= w * 0.85 && data.duration >= 300) {
+                    setSliderDone(true);
+                    resolve();
+                  } else {
+                    setSliderDone(false);
+                    reject();
+                  }
                 })
               }
               tipText={{ default: "按住滑块拖到最右侧" }}

@@ -20,7 +20,7 @@ import { AdminStorageView } from "./views/admin/AdminStorageView";
 import { AdminStatusView } from "./views/admin/AdminStatusView";
 import { SettingsPage } from "./SettingsPage";
 import { StoragePage } from "./StoragePage";
-import { MapView } from "./MapView";
+import { MapExplorePage } from "./MapExplorePage";
 import { ImportWizard } from "./ImportWizard";
 
 function useHashRoute(): [string, (v: string) => void] {
@@ -186,7 +186,7 @@ function ShellInner({ onLock }: { onLock: () => void }) {
               onChange={(e) => setSearchQ(e.target.value)}
             />
           )}
-          {searchVisible && <span style={{ flex: 1 }} />}
+          <span style={{ flex: 1 }} />
           {uploadVisible && (
             <button className="primary" onClick={pickUploadFiles}>
               <Ic name="i-upload" />
@@ -227,7 +227,7 @@ function ShellInner({ onLock }: { onLock: () => void }) {
           {view === "storage" && !platform.isRemote && <StoragePage onDone={() => nav("photos")} />}
           {view === "settings" && <SettingsPage onDone={() => nav("photos")} />}
           {view === "import" && !platform.isRemote && <ImportWizard onDone={() => nav("photos")} />}
-          {view === "map" && <MapViewView />}
+          {view === "map" && <MapExplorePage placeKey={sessionStorage.getItem("map_place") ?? undefined} />}
           {view === "shares" && !platform.isRemote && (
             <p className="hint" style={{ marginTop: 60, textAlign: "center" }}>
               分享链接需连接后台使用。
@@ -281,24 +281,6 @@ function ShellInner({ onLock }: { onLock: () => void }) {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function MapViewView() {
-  const [blobs, setBlobs] = useState<import("../lib/api").BlobEntry[]>([]);
-  useEffect(() => {
-    api.listBlobs().then((b) => setBlobs(b.filter((x) => x.gps_lat != null && x.gps_lon != null)));
-  }, []);
-  return (
-    <div>
-      <div className="view-head">
-        <a className="hint" onClick={() => (window.location.hash = "#/explore")} style={{ cursor: "pointer" }}>
-          ← 返回探索
-        </a>
-        <h2>地图</h2>
-      </div>
-      <MapView blobs={blobs} onDone={() => (window.location.hash = "#/explore")} />
     </div>
   );
 }
@@ -476,11 +458,13 @@ function TotpModal({ onClose }: { onClose: () => void }) {
             className="primary"
             onClick={async () => {
               if (!setup) return;
-              if (await totpVerifyLocal(setup.secret, code)) {
+              try {
+                // 服务端校验验证码后才真正启用（此前未确认也生效的缺陷已修复）
+                await api.totpEnable(setup.secret, code);
                 toast.success("两步验证已启用");
                 onClose();
-              } else {
-                toast.error("验证码错误，未启用");
+              } catch (e) {
+                toast.error(String(e));
               }
             }}
           >

@@ -142,6 +142,54 @@ table.admin th { color: var(--muted); font-weight: 500; }
 #login input { width: 100%; margin: 8px 0; }
 #login button { width: 100%; margin-top: 12px; }
 
+/* ---------- 滑动验证码 ---------- */
+.slider {
+  position: relative;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin: 14px 0 4px;
+  user-select: none;
+}
+.slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.slider-thumb {
+  position: absolute;
+  top: 3px;
+  left: 2px;
+  width: 54px;
+  height: calc(100% - 6px);
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  font-weight: 700;
+  color: var(--primary);
+  z-index: 2;
+}
+.slider.done .slider-fill { width: 100% !important; background: color-mix(in srgb, var(--success) 30%, transparent); }
+.slider.done .slider-thumb { left: calc(100% - 56px); }
+.slider-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.slider.done .slider-text { color: var(--success); }
+
 /* ---------- 其他 ---------- */
 #toast { position: fixed; top: 16px; right: 16px; z-index: 300; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--primary); padding: 12px 16px; border-radius: 10px; display: none; max-width: 380px; font-size: 14px; white-space: pre-wrap; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

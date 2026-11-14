@@ -358,6 +358,8 @@ const localApi = {
   purgeBlob: (blobHash: string) => invoke<void>("purge_blob", { blobHash }),
   listTrashed: () => invoke<BlobEntry[]>("list_trashed"),
   openPathSystem: (path: string) => invoke<void>("open_path_system", { path }),
+  probeStorage: (kind: string, config: Record<string, unknown>) =>
+    invoke<string>("probe_storage", { kind, config }),
 
   // 本地模式文件对话框
   pickFiles: async (): Promise<string[]> => {
@@ -660,6 +662,12 @@ const remoteApi = {
     }),
   totpSetup: () =>
     remoteFetch<{ secret: string; uri: string }>("/api/me/totp/setup", { method: "POST" }),
+  totpEnable: (secret: string, code: string) =>
+    remoteFetch<void>("/api/me/totp/enable", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ secret, code }),
+    }),
   totpDisable: () => remoteFetch<void>("/api/me/totp/disable", { method: "POST" }),
 
   // ---- 分享 ----
@@ -751,6 +759,9 @@ const localAdminStubs = {
     throw new Error("本地模式暂不支持头像");
   },
   totpSetup: async () => {
+    throw new Error("TOTP 需连接后台使用");
+  },
+  totpEnable: async () => {
     throw new Error("TOTP 需连接后台使用");
   },
   totpDisable: async () => {
@@ -879,7 +890,10 @@ export interface ApiProvider {
   me(): Promise<MeInfo>;
   setAvatar(dataUrl: string): Promise<void>;
   totpSetup(): Promise<{ secret: string; uri: string }>;
+  totpEnable(secret: string, code: string): Promise<void>;
   totpDisable(): Promise<void>;
+  /** 存储连通性探针（本地模式；不落库） */
+  probeStorage(kind: string, config: Record<string, unknown>): Promise<string>;
   // ---- 分享（远端） ----
   listShares(): Promise<ShareInfo[]>;
   createShare(blobHashes: string[], expiresDays: number | null, accessCode: string | null): Promise<{ url: string }>;
@@ -925,6 +939,9 @@ const remoteMissing = {
   pickDirectory: async (): Promise<string | null> => {
     const picked = await open({ directory: true, title: "选择目录" });
     return typeof picked === "string" ? picked : null;
+  },
+  probeStorage: async (): Promise<string> => {
+    throw new Error("后台模式在网页端存储管理页测试连通性");
   },
 };
 

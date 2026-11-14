@@ -253,12 +253,19 @@ $("menu-totp").onclick = async () => {
       // 二维码生成失败不影响手动输入密钥
     }
     $("totp-ok").onclick = async () => {
-      if (!crate_totp_verify_local(setup.secret, $("totp-confirm").value)) {
+      const code = $("totp-confirm").value;
+      if (!crate_totp_verify_local(setup.secret, code)) {
         toast("验证码错误，未启用", true);
         return;
       }
-      closeModal();
-      toast("两步验证已启用");
+      try {
+        // 服务端校验通过后才真正启用（此前未确认也生效的缺陷已修复）
+        await api("/api/me/totp/enable", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ secret: setup.secret, code }) });
+        closeModal();
+        toast("两步验证已启用");
+      } catch (e) {
+        toast(e.message || "启用失败", true);
+      }
     };
     $("totp-off").onclick = async () => {
       await api("/api/me/totp/disable", { method: "POST" });
