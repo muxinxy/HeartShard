@@ -135,23 +135,29 @@ let sliderDone = false;
   const fill = $("slider-fill");
   const text = $("slider-text");
   let dragging = false;
-  const max = () => slider.clientWidth - thumb.offsetWidth - 4;
+  // 滑块可移动的最大相对位移（相对轨道内边距）
+  const max = () => slider.clientWidth - thumb.offsetWidth - 6;
   const onMove = (e) => {
     if (!dragging || sliderDone) return;
     const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const x = Math.max(0, Math.min(max(), cx - 2 - thumb.offsetWidth / 2 + 30));
-    thumb.style.left = 2 + x + "px";
-    fill.style.width = x + thumb.offsetWidth + 4 + "px";
-    if (x >= max()) {
+    // 关键：以轨道的屏幕位置为基准换算相对位移（此前误用页面绝对坐标）
+    const rect = slider.getBoundingClientRect();
+    const thumbW = thumb.offsetWidth;
+    const x = Math.max(0, Math.min(max(), cx - rect.left - thumbW / 2));
+    thumb.style.left = 3 + x + "px";
+    fill.style.width = x + thumbW + "px";
+    if (x >= max() - 2) {
       sliderDone = true;
       slider.classList.add("done");
+      thumb.style.left = "";
+      fill.style.width = "";
       text.textContent = "验证通过";
       $("login-btn").disabled = false;
     }
   };
   const up = () => {
     if (!sliderDone && dragging) {
-      thumb.style.left = "2px";
+      thumb.style.left = "3px";
       fill.style.width = "0";
     }
     dragging = false;
