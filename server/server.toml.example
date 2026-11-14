@@ -13,14 +13,14 @@ driver = "sqlite"
 # driver = "mysql"
 # url = "mysql://heartshard:密码@mysql:3306/heartshard"
 
+# 同步轮询间隔（秒；0 = 仅手动）。注意：须位于 [[users]] 之前的顶层作用域
+sync_interval_secs = 300
+
 # 引导管理员（首次启动创建；之后可在网页端管理）
 [[users]]
 name = "admin"
 password_env = "HEARTSHARD_ADMIN_PW"
 admin = true
-
-# 同步轮询间隔（秒；0 = 仅手动）
-sync_interval_secs = 300
 
 # 同步源示例（也可在网页端「同步源」页配置，保存后入库）
 # [[sources]]

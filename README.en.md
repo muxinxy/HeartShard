@@ -1,80 +1,116 @@
+<div align="center">
+
+<img src="apps/tauri/src-tauri/icons/icon.png" width="128" alt="HeartShard icon"/>
+
 # HeartShard
 
-> **Shatter your memories into pieces — and let every cloud you trust raise them.**
+**Shatter your memories into pieces — and let every cloud you trust raise them.**
 
-[中文](README.md)
+[简体中文](README.md) | [English](README.en.md)
 
-HeartShard is a **pure client-side, serverless, end-to-end encrypted** multi-cloud photo album system spanning Windows / Android / iOS / HarmonyOS. Photos and videos are split into chunks, encrypted, protected with erasure coding, and scattered across the user's own cloud storage (S3-compatible / WebDAV / OpenList / FTP). **No servers, no accounts, no centralized index** — cloud storage acts purely as a passive blob repository; all decryption, indexing, and synchronization logic runs on the client.
+</div>
 
-Built for privacy-sensitive users who want their photos on multiple drives / NAS / S3 buckets without trusting any single provider.
+HeartShard is an end-to-end encrypted family photo album for Windows, Android
+and the Web. Use it **pure client-side** (no server, no accounts — talking
+straight to your own cloud storage) or connect it to a **self-hosted server**
+for multi-user, web access and share links. Photos/videos are sharded,
+encrypted and scattered across your own S3-compatible / WebDAV / OpenList /
+FTPS storage — the cloud and the server learn nothing.
 
-## Key Features
+## Contents
 
-- 🔐 **End-to-end encryption**: AES-256-GCM chunk encryption with a per-blob key (HKDF-derived) and a random IV per chunk; the passphrase derives the master key via Argon2id — neither passphrase nor keys ever touch disk
-- 🧩 **Sharding + erasure coding**: files split into 256 KiB–4 MiB chunks, Reed-Solomon redundancy (default n=4, m=2) — a full cloud-storage outage still allows complete recovery
-- 🗂 **Directories are albums**: Windows directory import becomes an album tree inside the encrypted index; original file names and directory structure are never visible in the cloud
-- 🔄 **Multi-device sync**: pure client-side Lamport-clock merging, no real-time consistency required
-- ☁️ **Multi-cloud dispersion**: shards of the same blob are forced onto different Storages; S3 / WebDAV / OpenList / FTP with weights and health checks
-- 📱 **One core, four platforms**: a single Rust core shared by two shells — Tauri (Windows/Android/iOS) and native ArkTS (HarmonyOS)
+- [Features](#features)
+- [Two ways to use](#two-ways-to-use)
+- [Docker deployment](#docker-deployment)
+- [Quick start (dev)](#quick-start-dev)
+- [Repository layout](#repository-layout)
+- [License](#license)
 
-## Current Progress
+## Features
 
-| Milestone | Scope | Status |
-|---|---|---|
-| **M0** | MixFile algorithm study + core-rs (keypath / crypto / ida / shard) + locked test vectors | ✅ Done (`fe5d3e6`) |
-| **M1** | Tauri Windows: upload → local-directory mock Storage → download & restore → SHA-256 verify | ✅ Done (E2E green) |
-| **M2** | S3 adapter (SigV4) + SQLCipher index + two-device Lamport sync | ✅ Done (timelines converge in E2E; conflict rulings unit-tested) |
-| **M3** | **Android** Tauri shell (aarch64 APK) + WebDAV adapter + background transfer | ✅ Done (shell/WebDAV/foreground service; §8.5 five-phase wizard UI + import_staging resume implemented) |
-| **M4** | HarmonyOS ArkTS shell + Rust FFI + OpenList adapter | OpenList adapter ✅ (mock covers all endpoints; live-instance acceptance pending); HarmonyOS shell ⚠️ requires DevEco/OHOS SDK (unavailable here), see [dev guide](docs/development.en.md) |
-| **M5** | iOS + FTP/FTPS + repair/rebalance + threat-model document | Repair ✅, rebalance ✅, FTP/FTPS ✅ (live acceptance pending), [threat model](docs/threat-model.md) ✅; iOS ❌ requires macOS |
-| **Artifacts** | Windows portable exe; Android APK (aarch64) | ✅ Two artifacts in `dist/` + §12.2 scenarios E2E green |
+- **End-to-end encryption**: per-chunk AES-256-GCM, Leopard-RS erasure coding
+  (default n=4/m=2), SHA-256 everywhere; the password derives the master key
+  via Argon2id and never leaves the device
+- **Album-first UI**: timeline, grid, album tree, favorites, restorable trash,
+  map, day/year-month navigation — crypto/sharding details tucked away
+- **Privacy sharing**: album or multi-photo links with **EXIF/GPS metadata
+  stripped by default**, optional expiry & access code; WebCrypto decryption,
+  the server only ever sees ciphertext
+- **Optional self-hosted server**: argon2id auth, album-level permissions
+  (hidden/view/upload/manage with inheritance), TOTP 2FA, sync sources
+- **Multi-device sync**: Lamport clocks + LWW merge + delta; syncer CLI for
+  local dirs and cloud sources (append/mirror strategies)
+- **Motion photos**: Android Motion Photo (trailing MP4) detection,
+  extraction, playback and two-file export; Apple Live Photo pairing
+- **Multi-cloud**: shards of one blob land on different storages; S3
+  (hand-written SigV4), WebDAV, OpenList (token), FTPS
 
-> Platform priority (adjusted 2026-11-01): **Windows → Android first**; iOS and HarmonyOS follow.
-> Remaining honest gaps: task center / virtual-scrolled timeline / map views (rest of §10 UI),
-> "HarmonyOS 100MB WebDAV chunked" E2E (with HarmonyOS shell), incremental sync delta,
-> live-endpoint acceptance for each protocol.
+## Two ways to use
 
-## Getting Started (Development)
+### 1. Pure client-side (serverless)
 
-Requirements: [mise](https://mise.jdx.dev) for toolchains; pwsh recommended as the terminal.
+Add your cloud storage in the desktop app; the data dir lives on your
+machine — no server, no accounts. Share the `mk.wrap` key file across
+devices for sync.
 
-```powershell
-git clone <repo-url> heartshard; cd heartshard
-mise install          # rust stable + node 24 + pnpm
-cargo test --manifest-path core-rs/Cargo.toml --workspace   # 38 tests should pass
-cargo run --manifest-path tools/keypath-tests/Cargo.toml    # shared keypath vectors (40 cases)
+### 2. Self-hosted server
+
+- Multi-user + album ACL + TOTP 2FA + share links
+- Switch the desktop lock screen to "Connect to server"; open the server URL
+  in a mobile browser to install the PWA
+- See [server.toml.example](server/server.toml.example) and the
+  [development guide](docs/development.md) (Chinese) for details
+
+## Docker deployment
+
+The server ships a multi-arch image (amd64 / arm64 / armv7):
+
+```bash
+docker pull ghcr.io/muxinxy/heartshard-server:v0.1.0
+
+docker run -d -p 8420:8420 \
+  -v heartshard-lib:/data/library \
+  -v heartshard-meta:/data/meta \
+  -e HEARTSHARD_LIB_PW=your-library-passphrase \
+  ghcr.io/muxinxy/heartshard-server:v0.1.0
 ```
 
-See the [Development Guide](docs/development.en.md) for environment setup, architecture conventions, the test-vector provenance chain, and commit discipline.
+Or use [docker-compose.yml](docker-compose.yml): set `HEARTSHARD_LIB_PW` in
+`.env`, then `docker compose up -d` and open `http://nas:8420`.
 
-## Repository Layout
+## Quick start (dev)
+
+```powershell
+git clone https://github.com/muxinxy/HeartShard.git heartshard; cd heartshard
+mise install          # rust stable + node 24 + pnpm
+cargo test --manifest-path core-rs/Cargo.toml --workspace
+```
+
+Build artifacts:
+
+```powershell
+cd apps\tauri; pnpm tauri build                 # Windows portable exe
+.\scripts\build-android-apk.ps1                 # Android APK (arm64)
+cd server; cargo build --release                # server binary
+```
+
+See the [development guide](docs/development.md) (Chinese) and the
+[changelog](CHANGELOG_EN.md) for more.
+
+## Repository layout
 
 ```
 heartshard/
-├── core-rs/                    # Rust core shared by all four platforms (built as WASM / cdylib)
-│   └── crates/
-│       ├── keypath/            # object-key generation + filename validation (single source of truth)
-│       ├── crypto/             # AES-256-GCM chunk encryption + Argon2id/HKDF key derivation
-│       ├── ida/                # Reed-Solomon information dispersal
-│       └── shard/              # blob → chunk → encrypt → disperse → reassemble pipeline
-├── apps/                       # platform shells (from M1)
-├── tools/keypath-tests/        # cross-platform keypath consistency tests (shared vectors + checker)
-├── docs/                       # research & development documents
-│   ├── mixfile-study.md        # MixFile algorithm study (parameters, vectors, design rulings)
-│   ├── fixtures/               # machine-readable test vectors + generators (Java/Python sources)
-│   └── development.md          # development guide (Chinese; English: development.en.md)
-└── .research/                  # upstream reference clones (gitignored)
+├── core-rs/crates/             # Rust core: keypath / crypto / ida / shard / index
+│   └── heart-core/             # platform-agnostic library: HeartCore + cloud adapters
+├── apps/tauri/                 # Windows + Android client (Tauri 2 + React)
+├── server/                     # self-hosted server (axum: users/ACL/sync/share/PWA)
+├── tools/syncer/               # album sync CLI (append/mirror strategies)
+├── scripts/                    # build scripts (Android APK pipeline)
+├── docs/                       # dev guide / threat model / algorithm research
+└── .github/workflows/          # multi-platform, multi-arch CI
 ```
-
-## Security Model (Summary)
-
-- A cloud provider sees only: encrypted shards, unreadable hash-based object keys, encrypted manifests and index
-- The passphrase never touches disk; the master key lives in session memory only; sensitive storage credentials are encrypted with derived keys at rest
-- Log redaction: no shard contents, no full URL queries, no keys
-- Integrity chain: per-shard SHA-256 → RS reassembly → GCM tag/AAD (binding blob identity & chunk position) → per-chunk and blob-level SHA-256
-
-The full threat model ships with M5; algorithm alignment and design rulings are documented in [docs/mixfile-study.md](docs/mixfile-study.md).
 
 ## License
 
-TBD.
+[MIT](LICENSE)

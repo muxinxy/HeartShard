@@ -29,6 +29,7 @@ server/meta.db-*
 # node
 node_modules/
 dist/
+docker/bin/
 
 # local db / secrets
 *.db

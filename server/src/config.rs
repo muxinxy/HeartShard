@@ -79,8 +79,42 @@ pub struct GroupEntry {
 
 impl ServerConfig {
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
-        let raw = std::fs::read_to_string(path)
-            .map_err(|e| format!("读取配置失败 {}: {e}", path.display()))?;
+        let raw = match std::fs::read_to_string(path) {
+            Ok(raw) => raw,
+            // 首次启动（docker 首跑 / 裸跑二进制）：从内置模板生成默认配置
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let example = include_str!("../server.toml.example");
+                eprintln!(
+                    "提示：配置 {} 不存在，已生成默认配置（可修改后重启生效）",
+                    path.display()
+                );
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("创建配置目录失败 {}: {e}", parent.display()))?;
+                }
+                std::fs::write(path, example)
+                    .map_err(|e| format!("写入默认配置失败 {}: {e}", path.display()))?;
+                example.to_string()
+            }
+            Err(e) => return Err(format!("读取配置失败 {}: {e}", path.display())),
+        };
         toml::from_str(&raw).map_err(|e| format!("配置解析失败: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 随包发布的 server.toml.example 必须能被 ServerConfig 解析
+    /// （docker 首跑会把它作为默认配置写出）。
+    #[test]
+    fn example_config_parses() {
+        let raw = include_str!("../server.toml.example");
+        let cfg: ServerConfig = toml::from_str(raw).expect("example 配置应可解析");
+        assert_eq!(cfg.port, 8420);
+        assert_eq!(cfg.library.dir, "/data/library");
+        assert_eq!(cfg.sync_interval_secs, 300);
+        assert_eq!(cfg.users.len(), 1);
     }
 }
