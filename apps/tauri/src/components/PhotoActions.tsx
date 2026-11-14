@@ -409,6 +409,7 @@ function ShareDialog({ dlg, onClose }: { dlg: NonNullable<ShareDlg>; onClose: ()
 
   const isAlbum = "album" in dlg;
   const title = isAlbum ? `分享相册「${dlg.album.name}」` : `分享 ${dlg.hashes.length} 张照片`;
+  const single = !isAlbum && dlg.hashes.length === 1;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -416,7 +417,8 @@ function ShareDialog({ dlg, onClose }: { dlg: NonNullable<ShareDlg>; onClose: ()
         <h3>{title}</h3>
         {!urls ? (
           <>
-            {!isAlbum && (
+            {/* 多张才有聚合 / 逐个之分；单张直接创建一个链接 */}
+            {!isAlbum && !single && (
               <div className="row" style={{ margin: "8px 0" }}>
                 <label>
                   <input type="radio" name="share-mode" checked={mode === "agg"} onChange={() => setMode("agg")} /> 聚合分享（一个链接）

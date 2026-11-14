@@ -135,16 +135,22 @@ export function PhotoGrid({
                     key={b.blob_hash}
                     className={`cell${sel ? " sel" : ""}`}
                     title={`${b.file_name} · ${new Date(b.taken_at * 1000).toLocaleString()}`}
-                    onClick={() => {
-                      if (onToggleSel) onToggleSel(b.blob_hash);
-                      else onOpen?.(b, idx);
-                    }}
-                    onDoubleClick={() => onOpen?.(b, idx)}
+                    onClick={() => onOpen?.(b, idx)}
                     onContextMenu={(e) => onCtx?.(e, b)}
                   >
                     <Thumb blobHash={b.blob_hash} mime={b.mime} />
                     {onToggleSel && (
-                      <span className="check">{sel ? "✓" : ""}</span>
+                      <span
+                        className={`check${sel ? " checked" : ""}`}
+                        title="选中 / 取消选中"
+                        onClick={(e) => {
+                          // 网页端同款：点击圆圈切换多选，点击照片其它区域打开预览
+                          e.stopPropagation();
+                          onToggleSel(b.blob_hash);
+                        }}
+                      >
+                        {sel ? "✓" : ""}
+                      </span>
                     )}
                     {b.is_motion && (
                       <span className="motion-badge">

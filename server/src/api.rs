@@ -1098,6 +1098,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/", get(|| async { Html(include_str!("webapp/index.html")) }))
         .route("/app.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/app.js")) }))
         .route("/sw.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/sw.js")) }))
+        .route("/qrcode.min.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/qrcode.min.js")) }))
         .route(
             "/manifest.webmanifest",
             get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json".to_string())], include_str!("webapp/manifest.webmanifest")) }),

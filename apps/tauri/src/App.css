@@ -22,7 +22,7 @@
   --row: #191c22;
   --row-border: #23262d;
   --toolbar-bg: rgba(20, 22, 26, 0.95);
-  --radius: 8px;
+  --radius: 10px;
   color-scheme: dark;
 }
 
@@ -766,6 +766,10 @@ h1, h2, h3 { color: var(--foreground); }
    以下为「按网页端重构」的设计系统（与 server/src/webapp/index.html 同源）
    ================================================================ */
 
+/* ---------- 全局圆角（按钮/输入统一 10px） ---------- */
+button { border-radius: 10px; }
+table.admin button, .form-card button, .selbar button { border-radius: 10px; }
+
 /* ---------- 线性 SVG 图标 ---------- */
 .ic {
   width: 16px;
@@ -1205,3 +1209,11 @@ button.danger { color: var(--destructive); }
 .perm-select { min-width: 90px; }
 .acl-tabs { display: flex; gap: 8px; margin: 10px 0; }
 .acl-tabs button.active { background: var(--primary); color: #fff; border: none; font-weight: 600; }
+
+/* ---------- 系统状态仪表盘 ---------- */
+.status-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+.status-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+.status-card h3 { margin: 0 0 10px; font-size: 15px; }
+@media (max-width: 900px) {
+  .status-charts { grid-template-columns: 1fr; }
+}

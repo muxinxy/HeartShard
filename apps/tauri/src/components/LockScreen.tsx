@@ -1,5 +1,6 @@
-// 锁屏 / 登录（网页端同款）：双模式切换；远端登录带滑动验证码 + TOTP 两步验证。
-import { useCallback, useEffect, useRef, useState } from "react";
+// 锁屏 / 登录（网页端同款）：双模式切换；远端登录带滑动验证码（rc-slider-captcha）+ TOTP 两步验证。
+import { useState } from "react";
+import SliderCaptcha from "rc-slider-captcha";
 import { api, currentMode, remoteUrl, setMode, TotpRequiredError, type ApiMode } from "../lib/api";
 
 export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
@@ -115,7 +116,22 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
             style={{ marginBottom: 0, marginTop: 12 }}
           />
         )}
-        {mode === "remote" && <Slider onDone={setSliderDone} />}
+        {mode === "remote" && (
+          <div className="captcha-wrap">
+            <SliderCaptcha
+              key={`${mode}-${needTotp}`}
+              mode="slider"
+              autoRequest={false}
+              onVerify={() =>
+                new Promise<void>((resolve) => {
+                  setSliderDone(true);
+                  resolve();
+                })
+              }
+              tipText={{ default: "按住滑块拖到最右侧" }}
+            />
+          </div>
+        )}
         <button onClick={submit} disabled={busy || !password || (mode === "remote" && !sliderDone)}>
           {mode === "remote" ? (busy ? "登录中…" : "登录") : busy ? "派生密钥中（Argon2id）…" : "解锁"}
         </button>
@@ -126,59 +142,6 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
             : "口令不落盘；主密钥仅存在于本次会话内存。"}
         </p>
       </div>
-    </div>
-  );
-}
-
-// ---------------- 滑动验证码（网页端 initSlider 同款，Pointer Events 兼容鼠标/触摸） ----------------
-
-function Slider({ onDone }: { onDone: (ok: boolean) => void }) {
-  const [done, setDone] = useState(false);
-  const [fillPx, setFillPx] = useState(0);
-  const track = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
-
-  const finish = useCallback(() => {
-    setDone(true);
-    onDone(true);
-  }, [onDone]);
-
-  useEffect(() => {
-    const move = (e: PointerEvent) => {
-      if (!dragging.current || !track.current || done) return;
-      const rect = track.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width - 57));
-      setFillPx(x);
-      if (x >= rect.width - 60) finish();
-    };
-    const up = () => {
-      dragging.current = false;
-      if (!done) setFillPx(0);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [done, finish]);
-
-  return (
-    <div className={`slider${done ? " done" : ""}`} ref={track}>
-      <div className="slider-fill" style={{ width: done ? undefined : fillPx + 57 }} />
-      <div
-        className="slider-thumb"
-        style={done ? undefined : { left: Math.max(3, fillPx) }}
-        onPointerDown={(e) => {
-          if (!done) {
-            dragging.current = true;
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-          }
-        }}
-      >
-        {done ? "✓" : "»"}
-      </div>
-      <span className="slider-text">{done ? "验证通过" : "按住滑块拖到最右侧"}</span>
     </div>
   );
 }

@@ -234,6 +234,7 @@ $("menu-totp").onclick = async () => {
     modal(`
       <h3>两步验证 (TOTP 2FA)</h3>
       <p class="hint">用验证器 App（Google Authenticator / 微软 Authenticator 等）扫码或手动输入密钥：</p>
+      <div id="totp-qr" style="text-align:center;margin:8px 0"></div>
       <div style="background:var(--input);border-radius:10px;padding:10px 12px;font-family:monospace;font-size:16px;letter-spacing:2px;text-align:center;word-break:break-all">${setup.secret}</div>
       <p class="hint" style="word-break:break-all">${setup.uri}</p>
       <label class="hint">输入 App 显示的 6 位验证码确认启用：</label>
@@ -242,6 +243,15 @@ $("menu-totp").onclick = async () => {
         <button class="danger" id="totp-off">关闭两步验证</button>
         <button class="primary" id="totp-ok">确认启用</button>
       </div>`);
+    // otpauth:// uri → 二维码（qrcode-generator 本地生成，无外呼）
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(setup.uri);
+      qr.make();
+      $("totp-qr").innerHTML = qr.createImgTag(4);
+    } catch (e) {
+      // 二维码生成失败不影响手动输入密钥
+    }
     $("totp-ok").onclick = async () => {
       if (!crate_totp_verify_local(setup.secret, $("totp-confirm").value)) {
         toast("验证码错误，未启用", true);

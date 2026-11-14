@@ -964,12 +964,25 @@ export const api: ApiProvider = new Proxy({} as ApiProvider, {
 });
 
 // 能力开关：组件按此隐藏本地专属入口
+// 能力开关：组件按此隐藏模式专属入口。
+// 用 getter 实时读取当前模式——LockScreen 切模式发生在同一次会话内，
+// 模块加载时快照会过期（此前导致本地模式误显分享/两步验证入口）。
 export const platform = {
-  isRemote: currentMode() === "remote",
-  canImportWizard: currentMode() !== "remote",
-  canStorageManage: currentMode() !== "remote", // 后台走网页管理页
-  canRebalance: currentMode() !== "remote",
-  canVerify: currentMode() !== "remote",
+  get isRemote() {
+    return currentMode() === "remote";
+  },
+  get canImportWizard() {
+    return !this.isRemote;
+  },
+  get canStorageManage() {
+    return !this.isRemote;
+  },
+  get canRebalance() {
+    return !this.isRemote;
+  },
+  get canVerify() {
+    return !this.isRemote;
+  },
   canExport: true,
   canPreview: true,
 };

@@ -1,6 +1,7 @@
 // 应用壳（网页端同款 IA）：侧边栏 + hash 路由 + 顶栏（搜索/上传/头像菜单）。
 // 分享与「管理」区仅连接后台模式显示；存储管理/设置仅本地模式显示。
 import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { api, MeInfo, platform, AlbumInfo } from "../lib/api";
 import { Ic } from "./icons";
 import { PhotoActionsProvider, usePhotoActions } from "./PhotoActions";
@@ -367,9 +368,11 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const [old, setOld] = useState("");
   const [nw, setNw] = useState("");
+  const [nw2, setNw2] = useState("");
   const [busy, setBusy] = useState(false);
+  const mismatch = nw.length > 0 && nw2.length > 0 && nw !== nw2;
   const submit = async () => {
-    if (!old || !nw) return;
+    if (!old || !nw || nw !== nw2) return;
     setBusy(true);
     try {
       await api.changePassword(old, nw);
@@ -387,9 +390,11 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
         <h3>修改密码</h3>
         <input type="password" placeholder="当前密码" value={old} onChange={(e) => setOld(e.target.value)} style={{ width: "100%", marginBottom: 8 }} />
         <input type="password" placeholder="新密码" value={nw} onChange={(e) => setNw(e.target.value)} style={{ width: "100%" }} />
+        <input type="password" placeholder="确认新密码" value={nw2} onChange={(e) => setNw2(e.target.value)} style={{ width: "100%", marginTop: 8 }} />
+        {mismatch && <p className="error">两次输入的新密码不一致</p>}
         <div className="row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
           <button onClick={onClose}>取消</button>
-          <button className="primary" onClick={submit} disabled={busy || !old || !nw}>
+          <button className="primary" onClick={submit} disabled={busy || !old || !nw || mismatch}>
             确定
           </button>
         </div>
@@ -403,13 +408,20 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
 function TotpModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [qr, setQr] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [totpHint, setTotpHint] = useState("");
 
   useEffect(() => {
     api
       .totpSetup()
-      .then(setSetup)
+      .then((s) => {
+        setSetup(s);
+        // otpauth:// uri → 二维码（验证器 App 扫码绑定）
+        QRCode.toDataURL(s.uri, { width: 200, margin: 1 })
+          .then(setQr)
+          .catch(() => setQr(null));
+      })
       .catch((e) => toast.error(String(e)));
   }, [toast]);
 
@@ -438,6 +450,11 @@ function TotpModal({ onClose }: { onClose: () => void }) {
         <p className="hint">用验证器 App（Google Authenticator / 微软 Authenticator 等）扫码或手动输入密钥：</p>
         {setup && (
           <>
+            {qr && (
+              <div style={{ textAlign: "center", margin: "8px 0" }}>
+                <img src={qr} alt="TOTP 二维码" style={{ background: "#fff", padding: 6, borderRadius: 10 }} />
+              </div>
+            )}
             <div style={{ background: "var(--input)", borderRadius: 10, padding: "10px 12px", fontFamily: "monospace", fontSize: 16, letterSpacing: 2, textAlign: "center", wordBreak: "break-all" }}>
               {setup.secret}
             </div>

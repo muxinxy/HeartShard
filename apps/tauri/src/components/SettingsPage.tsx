@@ -2,6 +2,7 @@
 // n/m 参数、默认分片大小、下载并发数。
 import { useEffect, useState } from "react";
 import { api, SettingsData } from "../lib/api";
+import { MAP_SOURCES, setMapSource } from "../lib/mapTiles";
 
 const CHUNK_SIZES = [
   { value: 256 * 1024, label: "256 KiB" },
@@ -157,7 +158,25 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
             <option value="light">浅色</option>
           </select>
         </label>
-        <p className="hint">主题保存在本机；本地模式下不写入后台配置。</p>
+        <label className="setting-row">
+          <span>地图源（探索地点 / 地图视图）</span>
+          <select
+            value={localStorage.getItem("hs_map_source") || "osm"}
+            onChange={(e) => {
+              setMapSource(e.target.value);
+              setSettings((s) => (s ? { ...s } : s));
+            }}
+          >
+            {MAP_SOURCES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">
+          主题与地图源保存在本机。高德 / Esri 瓦片无需密钥；百度地图因私有投影（BD-09）暂未内置，如需支持请反馈。
+        </p>
       </div>
     </div>
   );

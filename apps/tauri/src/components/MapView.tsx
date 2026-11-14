@@ -1,17 +1,21 @@
-// §10 地图视图：GPS-tagged blob 显示在 OSM 瓦片地图上（leaflet + OpenStreetMap）。
+// §10 地图视图：GPS-tagged blob 显示在可选瓦片源上（设置页可切换 OSM/高德/Esri/OpenTopoMap）。
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { BlobEntry } from "../lib/api";
+import { currentMapSource } from "../lib/mapTiles";
 
 export function MapView({ blobs, onDone }: { blobs: BlobEntry[]; onDone: () => void }) {
   const mapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!mapRef.current) return;
+    const src = currentMapSource();
     const map = L.map(mapRef.current);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap contributors",
+    L.tileLayer(src.url, {
+      attribution: src.attribution,
+      maxZoom: src.maxZoom,
+      ...(src.subdomains ? { subdomains: src.subdomains } : {}),
     }).addTo(map);
 
     const gpsBlobs = blobs.filter(

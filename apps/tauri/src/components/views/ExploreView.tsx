@@ -1,7 +1,10 @@
 // 探索（网页端 viewExplore 同款）：类别（最近添加/照片/视频/动态照片/未入相册）
-// + 地点（GPS 0.1° 网格聚类）；本地模式附地图入口。
+// + 地点（GPS 0.1° 网格聚类，卡片内嵌小地图）；本地模式附地图入口。
 import { useEffect, useMemo, useState } from "react";
+import { MapContainer, CircleMarker, TileLayer } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import { api, BlobEntry, platform } from "../../lib/api";
+import { currentMapSource } from "../../lib/mapTiles";
 import { PhotoGrid } from "../PhotoGrid";
 import { usePhotoActions } from "../PhotoActions";
 import { Ic } from "../icons";
@@ -97,16 +100,41 @@ export function ExploreView() {
 
       <h3 style={{ fontSize: 15, color: "var(--muted)", marginTop: 24 }}>地点</h3>
       {places.length === 0 ? (
-        <p className="hint">带 GPS 信息的照片会按拍摄地点自动聚类（EXIF）。</p>
+        <p className="hint">带 GPS 信息的照片会按拍摄地点自动聚类（EXIF）。可在「设置」里切换地图源（高德 / 卫星影像等）。</p>
       ) : (
         <div className="explore-grid">
-          {places.map(([key, items]) => (
-            <ExploreCard
-              key={key}
-              facet={{ key, label: `📍 ${key}`, icon: "i-explore", blobs: items }}
-              onOpen={() => setOpen({ title: key, blobs: items })}
-            />
-          ))}
+          {places.map(([key, items]) => {
+            const lat = items.reduce((s, b) => s + (b.gps_lat ?? 0), 0) / items.length;
+            const lon = items.reduce((s, b) => s + (b.gps_lon ?? 0), 0) / items.length;
+            const src = currentMapSource();
+            return (
+              <div key={key} className="explore-card" onClick={() => setOpen({ title: key, blobs: items })}>
+                <div style={{ height: 120, background: "var(--input)" }}>
+                  <MapContainer
+                    center={[lat, lon]}
+                    zoom={12}
+                    scrollWheelZoom={false}
+                    dragging={false}
+                    zoomControl={false}
+                    attributionControl={false}
+                    style={{ height: "100%" }}
+                  >
+                    <TileLayer
+                      url={src.url}
+                      attribution={src.attribution}
+                      maxZoom={src.maxZoom}
+                      {...(src.subdomains ? { subdomains: src.subdomains } : {})}
+                    />
+                    <CircleMarker center={[lat, lon]} radius={9} pathOptions={{ color: "#5b8def", fillOpacity: 0.5 }} />
+                  </MapContainer>
+                </div>
+                <div className="nm">
+                  <span>📍 {key}</span>
+                  <span className="cnt">{items.length}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
