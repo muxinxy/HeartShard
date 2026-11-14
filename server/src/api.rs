@@ -926,6 +926,75 @@ pub async fn delete_album(
     }
 }
 
+#[derive(serde::Deserialize)]
+pub struct AlbumRenameReq {
+    pub name: String,
+}
+
+/// POST /api/albums/{id}/rename —— 相册重命名（manage 权限）。
+pub async fn album_rename(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<AlbumRenameReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, &album_id, &parents) < Perm::Manage {
+            return err(StatusCode::FORBIDDEN, "无权修改该相册");
+        }
+    }
+    if req.name.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "名称不能为空");
+    }
+    let core = state.core.lock().unwrap();
+    match core.album_rename(&album_id, req.name.trim()) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct AlbumCoverReq {
+    pub blob_hash: String,
+}
+
+/// POST /api/albums/{id}/cover —— 设置相册封面（manage 权限；照片须在相册内）。
+pub async fn album_cover(
+    State(state): S,
+    headers: HeaderMap,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<AlbumCoverReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    {
+        let core = state.core.lock().unwrap();
+        let parents = match parent_map(&core) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if effective(&state, &user, &album_id, &parents) < Perm::Manage {
+            return err(StatusCode::FORBIDDEN, "无权修改该相册");
+        }
+    }
+    let core = state.core.lock().unwrap();
+    match core.album_set_cover(&album_id, &req.blob_hash) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}
+
 /// GET /api/blobs/orphans —— 未加入任何相册的照片/视频。
 pub async fn orphan_blobs(State(state): S, headers: HeaderMap) -> Response {
     let user = match auth(&state, &headers) {
@@ -1132,6 +1201,8 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/app.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/app.js")) }))
         .route("/sw.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/sw.js")) }))
         .route("/qrcode.min.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/qrcode.min.js")) }))
+        .route("/vendor/leaflet.js", get(|| async { ([(header::CONTENT_TYPE, "application/javascript".to_string())], include_str!("webapp/vendor/leaflet.js")) }))
+        .route("/vendor/leaflet.css", get(|| async { ([(header::CONTENT_TYPE, "text/css".to_string())], include_str!("webapp/vendor/leaflet.css")) }))
         .route(
             "/manifest.webmanifest",
             get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json".to_string())], include_str!("webapp/manifest.webmanifest")) }),
@@ -1163,6 +1234,8 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/albums/{id}/remove-blobs", post(album_remove_blobs))
         .route("/api/albums/{id}/move-blobs", post(album_move_blobs))
         .route("/api/albums/{id}", axum::routing::delete(delete_album))
+        .route("/api/albums/{id}/rename", post(album_rename))
+        .route("/api/albums/{id}/cover", post(album_cover))
         .route("/api/trash", get(trash_list))
         .route("/api/blobs/{hash}/restore", post(restore_blob))
         .route("/api/blobs/{hash}/purge", post(purge_blob))

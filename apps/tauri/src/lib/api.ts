@@ -545,11 +545,19 @@ const remoteApi = {
     });
     return data.id;
   },
-  albumRename: async (_albumId: string, _name: string) => {
-    // 后台 v1 无 album 重命名端点 → 跳过
-  },
+  albumRename: (albumId: string, name: string) =>
+    remoteFetch<void>(`/api/albums/${albumId}/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
   albumSetSort: async () => {},
-  albumSetCover: async () => {},
+  albumSetCover: (albumId: string, blobHash: string) =>
+    remoteFetch<void>(`/api/albums/${albumId}/cover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ blob_hash: blobHash }),
+    }),
   listAlbumBlobs: (albumId: string) => remoteFetch<BlobEntry[]>(`/api/albums/${albumId}/blobs`),
   albumAddBlob: async (albumId: string, blobHash: string) => {
     await remoteFetch(`/api/albums/${albumId}/add-blobs`, {

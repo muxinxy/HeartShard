@@ -362,6 +362,8 @@ function route() {
   const view = (location.hash || "#/photos").replace(/^#\//, "");
   if (!token) return;
   closeModal(); closeCtx(); // 防弹窗残留（分享成功后 route 重绘时清理）
+  // 离开地图页时销毁 Leaflet 实例
+  if (mapState) { try { mapState.map.remove(); } catch {} mapState = null; }
   document.querySelectorAll(".sidebar a[data-view]").forEach((a) => {
     a.classList.toggle("active", a.dataset.view === view);
   });
@@ -373,6 +375,7 @@ function route() {
   const map = {
     photos: viewPhotos,
     explore: viewExplore,
+    map: viewMap,
     favorites: viewFavorites,
     albums: viewAlbums,
     shares: viewShares,
@@ -956,7 +959,7 @@ async function viewExplore() {
       ${card('data-kind="motion"', "🎞", "动态照片", motions.length)}
       ${card('data-kind="orphan"', "box", "未入相册", orphans.length)}
     </div>
-    <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）</h3>
+    <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）${placeList.length ? `<a id="places-all" class="hint" style="cursor:pointer;margin-left:10px">🗺 地图查看全部</a>` : ""}</h3>
     ${placeList.length === 0
       ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
       : `<div class="album-wall" id="exp-places">
@@ -967,10 +970,13 @@ async function viewExplore() {
   v.querySelector('[data-kind="video"]').onclick = () => openFiltered("🎬 视频", (b) => b.mime.startsWith("video/"));
   v.querySelector('[data-kind="motion"]').onclick = () => openFiltered("🎞 动态照片", motions);
   v.querySelector('[data-kind="orphan"]').onclick = () => openFiltered("📦 未入相册", orphans);
-  v.querySelector('[data-kind="orphan"]').onclick = () => openFiltered("📦 未入相册", orphans);
+  // 地点卡片 → 地图探索页（点击地图上的缩略图簇进入对应照片）
   v.querySelectorAll("[data-place]").forEach((c) => {
-    c.onclick = () => openFiltered(`📍 ${c.dataset.place}`, places.get(c.dataset.place) || []);
+    c.onclick = () => { sessionStorage.setItem("map_place", c.dataset.place); location.hash = "#/map"; };
   });
+  if ($("places-all")) {
+    $("places-all").onclick = () => { sessionStorage.removeItem("map_place"); location.hash = "#/map"; };
+  }
 }
 // 过滤结果按时间线排列（按天分组 + 日期头）
 function openFiltered(title, predOrItems) {
@@ -1011,6 +1017,111 @@ function openFiltered(title, predOrItems) {
 }
 
 // ---------------- 收藏夹 ----------------
+// ---------------- 探索：地点地图（与桌面端 MapExplorePage 同款交互） ----------------
+// 按当前视野像素级聚类；缩略图最多堆叠 3 张 + 数量角标；单击单张 → 灯箱，
+// 点簇 → 放大下钻；最大层级仍多张时打开该簇照片时间线。
+let mapState = null;
+const MAP_SOURCES = [
+  { id: "osm", label: "OpenStreetMap", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: "© OpenStreetMap contributors", maxZoom: 19 },
+  { id: "amap", label: "高德地图", url: "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}", subdomains: "1234", attribution: "© 高德地图", maxZoom: 18 },
+  { id: "amap-sat", label: "高德卫星", url: "https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}", subdomains: "1234", attribution: "© 高德地图", maxZoom: 18 },
+  { id: "esri", label: "Esri 世界影像", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attribution: "© Esri, Maxar", maxZoom: 19 },
+  { id: "topo", label: "OpenTopoMap", url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", subdomains: "abc", attribution: "© OpenTopoMap", maxZoom: 17 },
+];
+function currentMapTiles() {
+  const id = localStorage.getItem("hs_map_source") || "osm";
+  return MAP_SOURCES.find((s) => s.id === id) || MAP_SOURCES[0];
+}
+async function viewMap() {
+  const v = $("view");
+  const place = sessionStorage.getItem("map_place") || "";
+  let gps = [];
+  try {
+    const blobs = await api("/api/blobs");
+    gps = blobs.filter((b) => b.gps_lat != null && b.gps_lon != null);
+    if (place) gps = gps.filter((b) => `${b.gps_lat.toFixed(1)}, ${b.gps_lon.toFixed(1)}` === place);
+  } catch (e) {
+    v.innerHTML = `<p class="hint">${e.message}</p>`;
+    return;
+  }
+  const src = currentMapTiles();
+  v.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="back-btn" id="mp-back">← 返回探索</button>
+      <h2 style="margin:6px 0">地图${place ? ` · ${place}` : ""}</h2>
+      <span class="badge">${gps.length} 张</span>
+      <span style="flex:1"></span>
+      <label class="hint">地图源 <select id="mp-src">${MAP_SOURCES.map((s) => `<option value="${s.id}" ${s.id === src.id ? "selected" : ""}>${s.label}</option>`).join("")}</select></label>
+      ${place ? `<button id="mp-all">查看全部地点</button>` : ""}
+      ${gps.length ? `<button id="mp-list">照片列表</button>` : ""}
+    </div>
+    <div id="mp-map" style="height:calc(100vh - 230px);border-radius:12px;z-index:1"></div>`;
+  $("mp-back").onclick = () => { sessionStorage.removeItem("map_place"); location.hash = "#/explore"; };
+  if ($("mp-all")) $("mp-all").onclick = () => { sessionStorage.removeItem("map_place"); viewMap(); };
+  if ($("mp-list")) $("mp-list").onclick = () => openFiltered(place ? `📍 ${place}` : "🗺 全部地点", gps);
+  $("mp-src").onchange = (e) => { localStorage.setItem("hs_map_source", e.target.value); viewMap(); };
+
+  const map = L.map("mp-map", { attributionControl: true });
+  L.tileLayer(src.url, { attribution: src.attribution, maxZoom: src.maxZoom, subdomains: src.subdomains || "abc" }).addTo(map);
+  const layer = L.layerGroup().addTo(map);
+  mapState = { map, layer, blobs: gps };
+
+  const rebuild = () => {
+    if (!mapState) return;
+    layer.clearLayers();
+    if (!gps.length) return;
+    const pts = gps.map((b) => ({ b, p: map.project([b.gps_lat, b.gps_lon], map.getZoom()) }));
+    const groups = [];
+    for (const pt of pts) {
+      const g = groups.find((x) => Math.hypot(x.px.x - pt.p.x, x.px.y - pt.p.y) <= 72);
+      if (g) g.items.push(pt.b);
+      else groups.push({ items: [pt.b], lat: pt.b.gps_lat, lon: pt.b.gps_lon, px: pt.p });
+    }
+    const maxZoom = map.getMaxZoom();
+    for (const g of groups) {
+      const stack = g.items.slice(0, 3).map((b, i) =>
+        `<div style="position:absolute;left:${i * 8}px;top:${i * -4}px;width:52px;height:52px;border-radius:8px;overflow:hidden;border:2px solid rgba(255,255,255,.85);box-shadow:0 2px 8px rgba(0,0,0,.45)"><img src="/api/blobs/${b.blob_hash}/thumbnail?token=${encodeURIComponent(token)}" style="width:100%;height:100%;object-fit:cover"></div>`
+      ).join("");
+      const badge = g.items.length > 1 ? `<div style="position:absolute;right:-6px;top:-6px;background:var(--primary);color:#fff;border-radius:999px;font-size:11px;padding:1px 6px;z-index:2">${g.items.length}</div>` : "";
+      const icon = L.divIcon({ html: `<div style="position:relative;width:84px;height:64px">${badge}${stack}</div>`, className: "thumb-cluster", iconSize: [84, 64], iconAnchor: [26, 26] });
+      const m = L.marker([g.lat, g.lon], { icon }).addTo(layer);
+      m.on("click", () => {
+        if (g.items.length === 1) { openViewer(g.items[0]); }
+        else if (map.getZoom() < maxZoom) { map.fitBounds(L.latLngBounds(g.items.map((b) => [b.gps_lat, b.gps_lon])).pad(0.15), { maxZoom }); }
+        else { openFiltered("📍 此处照片", [...g.items].sort((a, b) => b.taken_at - a.taken_at)); }
+      });
+    }
+  };
+
+  if (gps.length === 0) map.setView([35.0, 105.0], 4);
+  else map.fitBounds(L.latLngBounds(gps.map((b) => [b.gps_lat, b.gps_lon])).pad(0.2));
+  map.on("moveend zoomend", rebuild);
+  rebuild();
+}
+
+// 相册修改封面：从相册内照片中选一张（网页端与桌面端一致）
+function coverPicker(a) {
+  api(`/api/albums/${a.id}/blobs`).then((list) => {
+    const imgs = list.filter((b) => b.mime.startsWith("image/"));
+    modal(`<h3>修改封面 · ${a.name}</h3>
+      ${imgs.length === 0 ? `<p class="hint">相册内还没有照片，无法设置封面。</p>` : `
+      <div class="grid" style="max-height:60vh;overflow-y:auto;margin-top:10px">
+        ${imgs.map((b) => `<div class="cell" data-h="${b.blob_hash}" title="${b.file_name}"><img src="/api/blobs/${b.blob_hash}/thumbnail?token=${encodeURIComponent(token)}"></div>`).join("")}
+      </div>`}
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="primary" onclick="closeModal()">关闭</button></div>`);
+    document.querySelectorAll("#modal-root .cell").forEach((c) => {
+      c.onclick = async () => {
+        try {
+          await api(`/api/albums/${a.id}/cover`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blob_hash: c.dataset.h }) });
+          closeModal();
+          toast("封面已更新");
+          route();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+  }).catch((e) => toast(e.message, true));
+}
+
 async function viewFavorites() {
   blobs = await api("/api/blobs");
   const favs = blobs.filter((b) => b.favorite);
@@ -1088,8 +1199,16 @@ async function viewAlbums() {
       e.preventDefault();
       ctxMenu(e.clientX, e.clientY, [
         { label: ic("albums") + "打开相册", fn: () => { location.hash = `#/album-${aid}`; } },
+        { label: ic("image") + "修改封面", fn: () => coverPicker(a) },
         { label: ic("shares") + "分享相册", fn: () => shareAlbum(a) },
         { label: ic("lock") + "权限", fn: () => openAclEditor(a) },
+        { label: ic("edit") + "重命名", fn: () => uiForm("重命名相册", [{ id: "al-rename", label: "新名称", value: a.name }], async (v2) => {
+          if (!v2["al-rename"].trim()) { toast("名称不能为空", true); return; }
+          await api(`/api/albums/${aid}/rename`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: v2["al-rename"].trim() }) });
+          closeModal();
+          toast("已重命名");
+          route();
+        }) },
         { label: ic("trash") + "删除相册", fn: () => deleteAlbumDialog(a), danger: true },
       ]);
     };
