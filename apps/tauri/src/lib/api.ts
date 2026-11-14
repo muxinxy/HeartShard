@@ -164,6 +164,80 @@ export interface BlobDetail {
   per_storage: [string, number][];
 }
 
+// ---------------- 后台会话 / 分享 / ACL / 管理（对齐网页端能力） ----------------
+
+export interface MeInfo {
+  uid?: string;
+  name: string;
+  avatar: string | null;
+  is_admin: boolean;
+}
+
+/** 后台登录要求输入 TOTP 两步验证码 */
+export class TotpRequiredError extends Error {
+  constructor() {
+    super("请输入两步验证码");
+  }
+}
+
+export interface ShareInfo {
+  id: string;
+  kind: "album" | "blobs";
+  album_id?: string;
+  album_name?: string;
+  blob_hashes: string[];
+  name?: string;
+  expires_at: number | null;
+  access_code_hash?: string | null;
+  created_at?: number;
+}
+
+export interface ShareMetaItem {
+  hash: string;
+  name?: string;
+  taken_at?: number;
+  sanitized?: boolean;
+  mime?: string;
+}
+
+export interface ShareMeta {
+  album?: string;
+  files: ShareMetaItem[];
+}
+
+export interface AclEntry {
+  principal: { type: "user" | "group"; id: string };
+  perm: "none" | "view" | "upload" | "manage" | null;
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  avatar: string | null;
+  is_admin: boolean;
+  enabled: boolean;
+}
+
+export interface GroupInfo {
+  id: string;
+  name: string;
+  members: string[];
+}
+
+export interface SourceInfo {
+  id: string;
+  kind: string;
+  root?: string;
+  endpoint?: string;
+  strategy?: string;
+  delete_mode?: string;
+  [k: string]: unknown;
+}
+
+export interface AdminStatus {
+  [k: string]: unknown;
+}
+
 // ---------------- 模式管理 ----------------
 
 export type ApiMode = "local" | "remote";
@@ -547,6 +621,195 @@ const remoteApi = {
     }
     return out;
   },
+
+  // ---- 会话 / 个人（对齐网页端头像菜单） ----
+  remoteLogin: async (url: string, user: string, pass: string, totp?: string) => {
+    setRemoteUrl(url);
+    const res = await fetch(`${remoteUrl()}/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: user, password: pass, totp_code: totp || null }),
+    });
+    if (res.status === 401) {
+      const body = await res.json().catch(() => ({}));
+      if (body.totp_required) throw new TotpRequiredError();
+      throw new Error(body.error || "登录失败");
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "登录失败");
+    }
+    const data = await res.json();
+    setRemoteToken(data.token);
+    return data as { token: string; name: string; is_admin: boolean; avatar: string | null };
+  },
+  me: async (): Promise<MeInfo> => {
+    const d = await remoteFetch<Record<string, unknown>>("/api/me");
+    return {
+      uid: d.uid as string | undefined,
+      name: (d.name as string) || "我",
+      avatar: (d.avatar as string | null) ?? null,
+      is_admin: Boolean(d.is_admin),
+    };
+  },
+  setAvatar: (dataUrl: string) =>
+    remoteFetch<void>("/api/me/avatar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data_url: dataUrl }),
+    }),
+  totpSetup: () =>
+    remoteFetch<{ secret: string; uri: string }>("/api/me/totp/setup", { method: "POST" }),
+  totpDisable: () => remoteFetch<void>("/api/me/totp/disable", { method: "POST" }),
+
+  // ---- 分享 ----
+  listShares: () => remoteFetch<ShareInfo[]>("/api/shares"),
+  createShare: (blobHashes: string[], expiresDays: number | null, accessCode: string | null) =>
+    remoteFetch<{ url: string }>("/api/shares", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ blob_hashes: blobHashes, expires_days: expiresDays, access_code: accessCode }),
+    }),
+  cancelShare: (id: string) => remoteFetch<void>(`/api/shares/${id}`, { method: "DELETE" }),
+  shareMeta: async (id: string): Promise<ShareMeta> => {
+    // 公开端点（分享查看方无需登录）；后端对不存在/过期返回 JSON 错误体
+    const res = await fetch(`${remoteUrl()}/s/${id}/meta`);
+    const body = await res.text();
+    let meta: ShareMeta & { error?: string };
+    try {
+      meta = JSON.parse(body);
+    } catch {
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    if (!res.ok) throw new Error(meta.error || `HTTP ${res.status}`);
+    return meta;
+  },
+  albumShare: (albumId: string, expiresDays: number | null, accessCode: string | null) =>
+    remoteFetch<{ url: string }>(`/api/albums/${albumId}/share`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expires_days: expiresDays, access_code: accessCode }),
+    }),
+  albumDelete: (albumId: string) => remoteFetch<void>(`/api/albums/${albumId}`, { method: "DELETE" }),
+
+  // ---- 相册 ACL ----
+  getAcl: (albumId: string) => remoteFetch<AclEntry[]>(`/api/albums/${albumId}/acl`),
+  setAcl: (albumId: string, kind: "user" | "group", id: string, perm: string | null) =>
+    remoteFetch<void>(`/api/albums/${albumId}/acl`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ principal: { type: kind, id }, perm }),
+    }),
+  orphans: () => remoteFetch<BlobEntry[]>("/api/blobs/orphans"),
+
+  // ---- 管理区 ----
+  adminUsers: () => remoteFetch<AdminUser[]>("/api/admin/users"),
+  addAdminUser: (payload: Record<string, unknown>) =>
+    remoteFetch<void>("/api/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateAdminUser: (uid: string, payload: Record<string, unknown>) =>
+    remoteFetch<void>(`/api/admin/users/${uid}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deleteAdminUser: (uid: string) =>
+    remoteFetch<void>(`/api/admin/users/${uid}`, { method: "DELETE" }),
+  adminGroups: () => remoteFetch<GroupInfo[]>("/api/admin/groups"),
+  saveAdminGroups: (groups: GroupInfo[]) =>
+    remoteFetch<void>("/api/admin/groups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ groups }),
+    }),
+  adminSources: () => remoteFetch<SourceInfo[]>("/api/admin/sources"),
+  saveAdminSources: (sources: SourceInfo[]) =>
+    remoteFetch<void>("/api/admin/sources", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sources }),
+    }),
+  adminStatus: () => remoteFetch<AdminStatus>("/api/admin/status"),
+  verifyStorageAdmin: (id: string) =>
+    remoteFetch<string>("/api/admin/storage/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    }),
+};
+
+/** 本地模式不支持的后台能力占位（能力位控制入口隐藏） */
+const localAdminStubs = {
+  remoteLogin: async (): Promise<never> => {
+    throw new Error("本地模式无需登录后台");
+  },
+  me: async (): Promise<MeInfo> => ({ name: "本地相册库", avatar: null, is_admin: false }),
+  setAvatar: async () => {
+    throw new Error("本地模式暂不支持头像");
+  },
+  totpSetup: async () => {
+    throw new Error("TOTP 需连接后台使用");
+  },
+  totpDisable: async () => {
+    throw new Error("TOTP 需连接后台使用");
+  },
+  listShares: async (): Promise<ShareInfo[]> => {
+    throw new Error("分享链接需连接后台使用");
+  },
+  createShare: async (): Promise<{ url: string }> => {
+    throw new Error("分享链接需连接后台使用");
+  },
+  cancelShare: async () => {
+    throw new Error("分享链接需连接后台使用");
+  },
+  shareMeta: async (): Promise<ShareMeta> => {
+    throw new Error("分享链接需连接后台使用");
+  },
+  albumShare: async (): Promise<{ url: string }> => {
+    throw new Error("分享链接需连接后台使用");
+  },
+  albumDelete: async (albumId: string) => {
+    // 本地：删除相册（照片保留）— heart-core album_delete
+    await invoke<void>("album_delete", { albumId });
+  },
+  getAcl: async (): Promise<AclEntry[]> => [],
+  setAcl: async () => {
+    throw new Error("相册权限需连接后台使用");
+  },
+  orphans: async (): Promise<BlobEntry[]> => {
+    throw new Error("本地模式暂不支持未入相册统计");
+  },
+  adminUsers: async (): Promise<AdminUser[]> => {
+    throw new Error("管理区需连接后台使用");
+  },
+  addAdminUser: async () => {
+    throw new Error("管理区需连接后台使用");
+  },
+  updateAdminUser: async () => {
+    throw new Error("管理区需连接后台使用");
+  },
+  deleteAdminUser: async () => {
+    throw new Error("管理区需连接后台使用");
+  },
+  adminGroups: async (): Promise<GroupInfo[]> => {
+    throw new Error("管理区需连接后台使用");
+  },
+  saveAdminGroups: async () => {
+    throw new Error("管理区需连接后台使用");
+  },
+  adminSources: async (): Promise<SourceInfo[]> => {
+    throw new Error("管理区需连接后台使用");
+  },
+  saveAdminSources: async () => {
+    throw new Error("管理区需连接后台使用");
+  },
+  adminStatus: async (): Promise<AdminStatus> => ({}),
+  verifyStorageAdmin: async () => {
+    throw new Error("管理区需连接后台使用");
+  },
 };
 
 // ---------------- 统一出口 ----------------
@@ -611,6 +874,34 @@ export interface ApiProvider {
   pickSavePath(defaultName: string): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   uploadFiles(files: File[], albumId: string | null): Promise<ImportOutcome[]>;
+  // ---- 会话 / 个人（远端能力，本地有占位实现） ----
+  remoteLogin(url: string, user: string, pass: string, totp?: string): Promise<{ token: string; name: string; is_admin: boolean; avatar: string | null }>;
+  me(): Promise<MeInfo>;
+  setAvatar(dataUrl: string): Promise<void>;
+  totpSetup(): Promise<{ secret: string; uri: string }>;
+  totpDisable(): Promise<void>;
+  // ---- 分享（远端） ----
+  listShares(): Promise<ShareInfo[]>;
+  createShare(blobHashes: string[], expiresDays: number | null, accessCode: string | null): Promise<{ url: string }>;
+  cancelShare(id: string): Promise<void>;
+  shareMeta(id: string): Promise<ShareMeta>;
+  albumShare(albumId: string, expiresDays: number | null, accessCode: string | null): Promise<{ url: string }>;
+  albumDelete(albumId: string): Promise<void>;
+  // ---- 相册 ACL / 未入相册 ----
+  getAcl(albumId: string): Promise<AclEntry[]>;
+  setAcl(albumId: string, kind: "user" | "group", id: string, perm: string | null): Promise<void>;
+  orphans(): Promise<BlobEntry[]>;
+  // ---- 管理区（远端） ----
+  adminUsers(): Promise<AdminUser[]>;
+  addAdminUser(payload: Record<string, unknown>): Promise<void>;
+  updateAdminUser(uid: string, payload: Record<string, unknown>): Promise<void>;
+  deleteAdminUser(uid: string): Promise<void>;
+  adminGroups(): Promise<GroupInfo[]>;
+  saveAdminGroups(groups: GroupInfo[]): Promise<void>;
+  adminSources(): Promise<SourceInfo[]>;
+  saveAdminSources(sources: SourceInfo[]): Promise<void>;
+  adminStatus(): Promise<AdminStatus>;
+  verifyStorageAdmin(id: string): Promise<string>;
 }
 
 // 本地/远程各自缺的方法补齐为显式报错（能力由 platform 开关控制）
@@ -661,6 +952,7 @@ export const api: ApiProvider = new Proxy({} as ApiProvider, {
     const target: ApiProvider = {
       ...localApi,
       ...localMissing,
+      ...localAdminStubs,
       thumbnailUrl: (h: string) => localApi.thumbnail(h),
       largeUrl: (h: string) => localApi.thumbnailLarge(h),
       rawUrl: (h: string) => localApi.previewBlob(h).then((r) => `asset://localhost/${r.path}`),

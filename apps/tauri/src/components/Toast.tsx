@@ -1,5 +1,5 @@
 // 自定义通知组件（替换系统 alert）。
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useMemo } from "react";
 
 interface ToastItem {
   id: number;
@@ -34,8 +34,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const error = useCallback((msg: string) => show("error", msg), [show]);
   const info = useCallback((msg: string) => show("info", msg), [show]);
 
+  // 稳定 value：避免消费方 effect 因 identity 变化反复触发
+  const value = useMemo(() => ({ show, success, error, info }), [show, success, error, info]);
+
   return (
-    <ToastCtx.Provider value={{ show, success, error, info }}>
+    <ToastCtx.Provider value={value}>
       {children}
       <div className="toast-container">
         {toasts.map((t) => (

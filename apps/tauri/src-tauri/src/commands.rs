@@ -259,6 +259,15 @@ pub fn album_rename(
     state.core.lock().unwrap().album_rename(&album_id, &name).map_err(err_str)
 }
 
+/// 删除相册（照片保留在全部照片；本地模式）
+#[tauri::command]
+pub fn album_delete(
+    album_id: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.core.lock().unwrap().album_delete(&album_id).map_err(err_str)
+}
+
 #[tauri::command]
 pub fn album_set_sort(
     album_id: String,

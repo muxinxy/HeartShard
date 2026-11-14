@@ -143,22 +143,22 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
       <h2>外观</h2>
       <div className="settings-card">
         <label className="setting-row">
-          <span>深色模式</span>
-          <select value={settings?.theme ?? "dark"}
-            onChange={(e) => update({ theme: e.target.value })}>
+          <span>主题（也可在右上角头像菜单切换）</span>
+          <select
+            value={localStorage.getItem("hs_theme") || "dark"}
+            onChange={(e) => {
+              localStorage.setItem("hs_theme", e.target.value);
+              document.body.className = e.target.value === "light" ? "theme-light" : "";
+              // 重渲染本组件以刷新 select 值
+              setSettings((s) => (s ? { ...s } : s));
+            }}
+          >
             <option value="dark">深色</option>
             <option value="light">浅色</option>
           </select>
         </label>
-        {settings?.theme === "light" && (
-          <p className="hint">浅色主题在下次保存后生效（当前版本以深色为主）。</p>
-        )}
-        <button className="primary" onClick={() => settings && save(settings)} disabled={busy}>
-          保存
-        </button>
+        <p className="hint">主题保存在本机；本地模式下不写入后台配置。</p>
       </div>
     </div>
   );
 }
-
-// placeholder comment retained for formatting

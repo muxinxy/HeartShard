@@ -82,6 +82,7 @@ pub fn run() {
             commands::list_albums,
             commands::album_create,
             commands::album_rename,
+            commands::album_delete,
             commands::album_set_sort,
             commands::album_set_cover,
             commands::list_album_blobs,
