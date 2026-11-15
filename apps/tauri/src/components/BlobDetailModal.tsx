@@ -50,10 +50,10 @@ export function BlobDetailModal({
       const r = await api.verifyBlob(blob.blob_hash);
       setHealth(
         r.ok
-          ? `✔ 全部 ${r.shard_count} 个分片健康`
+          ? `全部 ${r.shard_count} 个分片健康`
           : r.unrecoverable
-            ? `✘ 不可恢复（可用 ${r.available}/${r.shard_count}）`
-            : `⚠ 降级（可用 ${r.available}/${r.shard_count}），可点「修复」`
+            ? `不可恢复（可用 ${r.available}/${r.shard_count}）`
+            : `降级（可用 ${r.available}/${r.shard_count}），可点「修复」`
       );
     } catch (e) {
       setError(String(e));
@@ -65,7 +65,7 @@ export function BlobDetailModal({
       const r = await api.repairBlob(blob.blob_hash);
       setHealth(
         r.unrecoverable.length > 0
-          ? `✘ ${r.unrecoverable.length} 个分片组损坏过重，无法自动修复`
+          ? `${r.unrecoverable.length} 个分片组损坏过重，无法自动修复`
           : `已修复 ${r.repaired.length} 个分片`
       );
     } catch (e) {
@@ -159,7 +159,7 @@ export function BlobDetailModal({
               <button className="primary" onClick={doPreview}>
                 预览
               </button>
-              <button onClick={doFavorite}>{favorite ? "♥ 取消收藏" : "♡ 收藏"}</button>
+              <button onClick={doFavorite}>{favorite ? "取消收藏" : "收藏"}</button>
               <button onClick={() => setRenaming(true)}>重命名</button>
               <button onClick={() => onExport(blob)}>下载 / 分享</button>
               <button onClick={doDelete} disabled={busy} style={{ color: "var(--destructive)" }}>

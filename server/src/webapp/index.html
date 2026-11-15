@@ -195,6 +195,21 @@ table.admin th { color: var(--muted); font-weight: 500; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint { color: var(--muted); font-size: 13px; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--input); color: var(--muted); white-space: nowrap; }
+/* 图标按钮（顶栏刷新等） */
+.icon-btn, #refresh-btn { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--fg); cursor: pointer; }
+.icon-btn:hover, #refresh-btn:hover { border-color: var(--primary); color: var(--primary); }
+/* 返回按钮（与桌面端一致） */
+.back-btn { display: inline-flex; align-items: center; gap: 4px; padding: 7px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--input); color: var(--fg); font-size: 14px; cursor: pointer; }
+.back-btn:hover { border-color: var(--primary); color: var(--primary); }
+/* 系统状态：迷你统计卡 + 图表卡 */
+.status-mini-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; margin-top: 12px; }
+.status-mini { background: var(--card); border: 1px solid var(--border); border-top-width: 3px; border-radius: 12px; padding: 12px 16px; text-align: center; }
+.status-mini .v { font-size: 22px; font-weight: 700; color: var(--fg); }
+.status-mini .k { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.status-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+.status-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+.status-card h3 { margin: 0 0 10px; font-size: 15px; }
+@media (max-width: 900px) { .status-charts { grid-template-columns: 1fr; } }
 table.admin td { word-break: break-all; }
 .modal { width: min(520px, 94vw); overflow-x: hidden; }
 html, body { height: 100%; }
@@ -251,7 +266,8 @@ html, body { height: 100%; }
     <symbol id="i-video" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
     <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></symbol>
     <symbol id="i-plus-user" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></symbol>
-    <symbol id="i-refresh" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
   </svg>
   <nav class="sidebar">
     <div class="logo">牧心相册</div>
@@ -266,13 +282,15 @@ html, body { height: 100%; }
     <a data-view="admin-groups" id="nav-admin-groups" style="display:none"><svg class="ic"><use href="#i-groups"/></svg>用户组</a>
     <a data-view="admin-sources" id="nav-admin-sources" style="display:none"><svg class="ic"><use href="#i-sync"/></svg>同步源</a>
     <a data-view="admin-storage" id="nav-admin-storage" style="display:none"><svg class="ic"><use href="#i-storage"/></svg>存储管理</a>
-    <a data-view="admin-status" id="nav-admin-status" style="display:none"><svg class="ic"><use href="#i-status"/></svg>系统状态</a>
+      <a data-view="admin-status" id="nav-admin-status" style="display:none"><svg class="ic"><use href="#i-status"/></svg>系统状态</a>
+      <a data-view="settings"><svg class="ic"><use href="#i-settings"/></svg>设置</a>
     <div style="flex:1"></div>
   </nav>
   <div class="main">
     <div class="topbar">
       <input type="search" id="search" placeholder="搜索照片 / 相册…">
       <span style="flex:1"></span>
+      <button id="refresh-btn" title="刷新当前页" style="display:none"><svg class="ic"><use href="#i-refresh"/></svg></button>
       <button class="primary" id="upload-btn" style="display:none"><svg class="ic"><use href="#i-upload"/></svg>上传</button>
       <div style="position:relative">
         <div class="avatar" id="avatar">我</div>
@@ -297,15 +315,15 @@ html, body { height: 100%; }
   <div id="lb-bar">
     <span id="lb-title" style="font-weight:600"></span>
     <span style="flex:1"></span>
-    <button id="lb-fav">⭐ 收藏</button>
-    <button id="lb-rename">✏️ 重命名</button>
-    <button id="lb-share">🔗 分享</button>
-    <button id="lb-detail">ℹ️ 详情</button>
-    <button id="lb-download">⬇️ 下载</button>
-    <button id="lb-move">↪️ 移动到</button>
-    <button id="lb-copy">⧉️ 复制到</button>
-    <button id="lb-trash" style="color:var(--danger)">🗑️ 回收站</button>
-    <button id="lb-close">✕</button>
+      <button id="lb-fav"><svg class="ic"><use href="#i-heart-filled"/></svg>收藏</button>
+      <button id="lb-rename"><svg class="ic"><use href="#i-edit"/></svg>重命名</button>
+      <button id="lb-share"><svg class="ic"><use href="#i-shares"/></svg>分享</button>
+      <button id="lb-detail"><svg class="ic"><use href="#i-box"/></svg>详情</button>
+      <button id="lb-download"><svg class="ic"><use href="#i-download"/></svg>下载</button>
+      <button id="lb-move"><svg class="ic"><use href="#i-albums"/></svg>移动到</button>
+      <button id="lb-copy"><svg class="ic"><use href="#i-folder-plus"/></svg>复制到</button>
+      <button id="lb-trash" style="color:var(--danger)"><svg class="ic"><use href="#i-trash"/></svg>回收站</button>
+      <button id="lb-close">✕</button>
   </div>
   <div id="lb-stage">
     <img id="full-img" alt="" draggable="false">

@@ -82,7 +82,7 @@ export function ExploreView() {
     sessionStorage.setItem("map_place", key);
     window.location.hash = "#/map";
   };
-  const label = (key: string) => (labels[key] ? `📍 ${labels[key]}` : `📍 ${key}`);
+  const label = (key: string) => labels[key] ?? key;
 
   if (open) {
     return (

@@ -187,6 +187,9 @@ function ShellInner({ onLock }: { onLock: () => void }) {
             />
           )}
           <span style={{ flex: 1 }} />
+          <button title="刷新当前页" onClick={() => actions.onChanged()}>
+            <Ic name="i-refresh" />
+          </button>
           {uploadVisible && (
             <button className="primary" onClick={pickUploadFiles}>
               <Ic name="i-upload" />

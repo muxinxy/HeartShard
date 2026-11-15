@@ -94,7 +94,7 @@ function Thumb40({ hash, mime }: { hash: string; mime: string }) {
     <img src={src} alt="" />
   ) : (
     <div style={{ width: 44, height: 44, background: "var(--input)", borderRadius: 8, display: "grid", placeItems: "center" }}>
-      {mime.startsWith("video/") ? "🎬" : "🖼"}
+      <svg className="ic" style={{ width: 18, height: 18 }}><use href={mime.startsWith("video/") ? "#i-video" : "#i-image"} /></svg>
     </div>
   );
 }

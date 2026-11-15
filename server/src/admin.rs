@@ -195,3 +195,54 @@ pub async fn status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
     }))
     .into_response()
 }
+
+// ---------------- 系统设置（分片参数等；admin） ----------------
+
+/// GET /api/admin/settings —— 当前 HeartCore 设置（分片大小 / n / m / 并发）。
+pub async fn get_settings(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Err(e) = require_admin(&state, &headers) {
+        return e;
+    }
+    let core = state.core.lock().unwrap();
+    let s = core.settings();
+    Json(serde_json::json!({
+        "chunk_size": s.chunk_size,
+        "n": s.n,
+        "m": s.m,
+        "download_concurrency": s.download_concurrency,
+        "theme": s.theme,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct UpdateSettingsReq {
+    pub chunk_size: Option<usize>,
+    pub n: Option<u8>,
+    pub m: Option<u8>,
+    pub download_concurrency: Option<usize>,
+}
+
+/// POST /api/admin/settings —— 更新分片参数（只影响新上传）。
+pub async fn update_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateSettingsReq>,
+) -> Response {
+    if let Err(e) = require_admin(&state, &headers) {
+        return e;
+    }
+    let mut core = state.core.lock().unwrap();
+    let s = core.settings().clone();
+    let ns = heart_core::library::Settings {
+        chunk_size: req.chunk_size.unwrap_or(s.chunk_size),
+        n: req.n.unwrap_or(s.n),
+        m: req.m.unwrap_or(s.m),
+        download_concurrency: req.download_concurrency.unwrap_or(s.download_concurrency),
+        theme: s.theme.clone(),
+    };
+    match core.set_settings(ns) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => s_err(e.to_string()),
+    }
+}

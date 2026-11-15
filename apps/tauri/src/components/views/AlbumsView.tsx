@@ -190,7 +190,7 @@ function AlbumWall({
                 {covers[a.id] ? (
                   <ThumbCover hash={covers[a.id]} />
                 ) : (
-                  <div className="thumb-placeholder">📁</div>
+                  <div className="thumb-placeholder"><svg className="ic" style={{ width: 26, height: 26 }}><use href="#i-albums" /></svg></div>
                 )}
               </div>
               <div className="album-card-name">
@@ -355,7 +355,7 @@ function CoverThumb({ hash }: { hash: string }) {
   useEffect(() => {
     api.thumbnailUrl(hash).then(setSrc).catch(() => {});
   }, [hash]);
-  return src ? <img src={src} alt="" /> : <div className="thumb-placeholder">🖼</div>;
+  return src ? <img src={src} alt="" /> : <div className="thumb-placeholder"><svg className="ic" style={{ width: 20, height: 20 }}><use href="#i-image" /></svg></div>;
 }
 
 function ThumbCover({ hash }: { hash: string }) {
@@ -363,7 +363,7 @@ function ThumbCover({ hash }: { hash: string }) {
   useEffect(() => {
     api.thumbnailUrl(hash).then(setSrc).catch(() => {});
   }, [hash]);
-  return src ? <img src={src} alt="" /> : <div className="thumb-placeholder">🖼</div>;
+  return src ? <img src={src} alt="" /> : <div className="thumb-placeholder"><svg className="ic" style={{ width: 20, height: 20 }}><use href="#i-image" /></svg></div>;
 }
 
 // ---------------- 相册详情 ----------------
@@ -543,7 +543,7 @@ function AclEditor({ album, onClose }: { album: AlbumInfo; onClose: () => void }
               const c = cur(r.kind, r.id);
               return (
                 <tr key={r.id}>
-                  <td>{r.kind === "user" ? "👤" : "🏷"} {r.name}</td>
+                  <td><svg className="ic"><use href={r.kind === "user" ? "#i-users" : "#i-groups"} /></svg> {r.name}</td>
                   <td>{c ? PERM_LABEL[c] || c : "继承"}</td>
                   <td>
                     <select className="perm-select" value={c ?? ""} onChange={(e) => set(r.kind, r.id, e.target.value)}>

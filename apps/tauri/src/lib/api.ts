@@ -521,14 +521,27 @@ const remoteApi = {
   importReportGet: async (): Promise<ImportRunReport> => {
     throw new Error("后台模式不支持导入历史");
   },
-  getSettings: async (): Promise<SettingsData> => ({
-    chunk_size: 0,
-    n: 0,
-    m: 0,
-    download_concurrency: 0,
-    theme: "dark",
-  }),
-  updateSettings: async () => {},
+  getSettings: async (): Promise<SettingsData> => {
+    const d = await remoteFetch<Record<string, unknown>>("/api/admin/settings");
+    return {
+      chunk_size: Number(d.chunk_size ?? 0),
+      n: Number(d.n ?? 0),
+      m: Number(d.m ?? 0),
+      download_concurrency: Number(d.download_concurrency ?? 0),
+      theme: (d.theme as string) || "dark",
+    };
+  },
+  updateSettings: (s2: SettingsData) =>
+    remoteFetch<void>("/api/admin/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chunk_size: s2.chunk_size,
+        n: s2.n,
+        m: s2.m,
+        download_concurrency: s2.download_concurrency,
+      }),
+    }),
   changePassword: async (oldPw: string, newPw: string) => {
     await remoteFetch("/api/me/password", {
       method: "POST",

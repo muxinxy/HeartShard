@@ -138,7 +138,7 @@ export function AlbumTree({ onDone }: { onDone: () => void }) {
                   onDoubleClick={() => { setRenaming(a.id); setRenameValue(a.name); }}
                   title="双击重命名"
                 >
-                  {a.cover_hash ? "📸 " : ""}{a.name}
+                  {a.cover_hash ? <svg className="ic" style={{ color: "#ffd479" }}><use href="#i-image" /></svg> : null}{a.name}
                 </span>
               )}
               <span className="meta">{a.blob_count} 个文件</span>

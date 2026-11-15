@@ -43,7 +43,7 @@ export function Thumb({ blobHash, mime }: { blobHash: string; mime: string }) {
       {src ? (
         <img src={src} alt="" />
       ) : (
-        <div className="thumb-placeholder">{isImage ? "🖼" : "📄"}</div>
+        <div className="thumb-placeholder"><svg className="ic" style={{ width: 22, height: 22 }}><use href={isImage ? "#i-image" : "#i-box"} /></svg></div>
       )}
     </div>
   );

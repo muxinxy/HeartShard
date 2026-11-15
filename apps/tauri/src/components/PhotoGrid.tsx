@@ -163,7 +163,7 @@ export function PhotoGrid({
                       </span>
                     )}
                     <span className="name">
-                      {b.favorite && "♥ "}
+                      {b.favorite && "已收藏 · "}
                       {b.file_name}
                     </span>
                   </div>

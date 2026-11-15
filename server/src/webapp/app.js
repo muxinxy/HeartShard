@@ -115,6 +115,7 @@ function showMain() {
     $(`nav-${v}`).style.display = isAdmin ? "flex" : "none";
   });
   $("admin-sec").style.display = isAdmin ? "block" : "none";
+  $("refresh-btn").style.display = "inline-block";
   route();
 }
 function setAvatarUi(el, u) {
@@ -352,7 +353,7 @@ $("menu-password").onclick = () => {
 };
 if (localStorage.getItem("hs_theme") === "light") document.body.classList.add("theme-light");
 // 深浅色菜单项初始文案
-$("menu-theme").textContent = document.body.classList.contains("theme-light") ? "☀️ 浅色模式" : "🌙 深色模式";
+$("menu-theme").textContent = document.body.classList.contains("theme-light") ? "浅色模式" : "深色模式";
 
 if (token) {
   api("/api/me").then((u) => { me = u; showMain(); }).catch(() => showLogin());
@@ -391,12 +392,15 @@ function route() {
     "admin-sources": viewAdminSources,
     "admin-storage": viewAdminStorage,
     "admin-status": viewAdminStatus,
+    settings: viewSettings,
   };
   $("view").innerHTML = `<p class="hint">加载中…</p>`;
   (map[view] || viewPhotos)().catch((e) => { $("view").innerHTML = `<p class="hint">${e.message}</p>`; });
 }
 
-$("search").addEventListener("input", () => {
+  // 顶栏刷新按钮：重渲染当前视图（每一页通用）
+  $("refresh-btn").onclick = () => route();
+  $("search").addEventListener("input", () => {
   searchQ = $("search").value.trim().toLowerCase();
   const view = (location.hash || "#/photos").replace(/^#\//, "");
   if (view === "photos") renderPhotoGrid();
@@ -490,7 +494,7 @@ function pickAlbumThen(mode, hashes) {
       <h3>${mode === "move" ? "移动到相册" : "复制到相册"}</h3>
       <p class="hint">${mode === "move" ? "照片将加入目标相册，并从当前位置移除。" : "照片将加入目标相册，原位置保留。"}</p>
       <div style="max-height:260px;overflow-y:auto">
-        ${list.map((a) => `<div class="album-row" style="cursor:pointer" data-aid="${a.id}">📁 ${a.name}</div>`).join("") || `<p class="hint">还没有相册。</p>`}
+        ${list.map((a) => `<div class="album-row" style="cursor:pointer" data-aid="${a.id}"><svg class="ic"><use href="#i-albums"/></svg> ${a.name}</div>`).join("") || `<p class="hint">还没有相册。</p>`}
       </div>`);
     document.querySelectorAll("#modal-root .album-row").forEach((row) => {
       row.onclick = async () => {
@@ -594,7 +598,7 @@ function renderPhotoGrid() {
   const list = filteredBlobs();
   const v = $("view");
   v.innerHTML = "";
-  if (list.length === 0) { v.innerHTML = `<p class="hint">没有照片。点右上角「⬆ 上传」导入。</p>`; return; }
+  if (list.length === 0) { v.innerHTML = `<p class="hint">没有照片。点右上角「上传」导入。</p>`; return; }
   const groups = groupByDay(list);
   currentGroups = groups;
   // 动态加载：先渲染 40 组，滚动到底加载更多
@@ -687,8 +691,8 @@ function photoCell(b) {
   cell.className = "cell" + (selected.has(b.blob_hash) ? " sel" : "");
   cell.innerHTML = `
     <span class="check" data-hash="${b.blob_hash}">✓</span>
-    ${b.is_motion ? `<span class="motion-badge" title="动态照片">🎞</span>` : ""}
-    <span class="name">${b.favorite ? "♥ " : ""}${b.file_name}</span>`;
+    ${b.is_motion ? `<span class="motion-badge" title="动态照片"><svg class="ic"><use href="#i-motion"/></svg></span>` : ""}
+    <span class="name">${b.favorite ? '<svg class="ic" style="color:#ffd479"><use href="#i-heart-filled"/></svg> ' : ""}${b.file_name}</span>`;
   if (b.mime.startsWith("image/")) {
     const img = new Image();
     img.loading = "lazy";
@@ -777,7 +781,7 @@ function openViewer(b) {
   lbCurrent = b;
   lbState = { zoom: 1, rotate: 0, flipH: 1, flipV: 1, ox: 0, oy: 0 };
   lbTransform();
-  $("lb-title").textContent = (b.is_motion ? "🎞 " : "") + b.file_name;
+  $("lb-title").innerHTML = (b.is_motion ? '<svg class="ic"><use href="#i-motion"/></svg> ' : "") + b.file_name;
   $("lb-fav").innerHTML = b.favorite ? "<svg class=\"ic filled\"><use href=\"#i-heart\"/></svg>" + "已收藏" : "<svg class=\"ic\"><use href=\"#i-heart\"/></svg>" + "收藏";
   // 操作按钮与多选条一致：收藏/重命名/分享/详情/下载/回收站
   $("lb-rename").style.display = "inline-block";
@@ -869,7 +873,7 @@ $("lb-fav").onclick = async () => {
   if (!lbCurrent) return;
   await api(`/api/blobs/${lbCurrent.blob_hash}/favorite`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ favorite: !lbCurrent.favorite }) });
   lbCurrent.favorite = !lbCurrent.favorite;
-  $("lb-fav").textContent = lbCurrent.favorite ? "♥ 已收藏" : "♡ 收藏";
+  $("lb-fav").innerHTML = lbCurrent.favorite ? '<svg class="ic filled" style="color:#ffd479"><use href="#i-heart-filled"/></svg> 已收藏' : '<svg class="ic"><use href="#i-heart"/></svg> 收藏';
   toast(lbCurrent.favorite ? "已收藏" : "已取消收藏");
 };
 $("lb-trash").onclick = () => {
@@ -962,20 +966,20 @@ async function viewExplore() {
       ${card('data-kind="recent"', "recent", "最近添加", recent.length)}
       ${card('data-kind="photo"', "image", "照片", photos.length)}
       ${card('data-kind="video"', "video", "视频", videos.length)}
-      ${card('data-kind="motion"', "🎞", "动态照片", motions.length)}
+      ${card('data-kind="motion"', "motion", "动态照片", motions.length)}
       ${card('data-kind="orphan"', "box", "未入相册", orphans.length)}
     </div>
     <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）${placeList.length ? `<a id="places-all" class="hint" style="cursor:pointer;margin-left:10px">🗺 地图查看全部</a>` : ""}</h3>
     ${placeList.length === 0
       ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
       : `<div class="album-wall" id="exp-places">
-          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "location", k, items.length)).join("")}
+          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length)).join("")}
         </div>`}`;
-  v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("🆕 最近添加", recent);
-  v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("🖼 照片", (b) => b.mime.startsWith("image/"));
-  v.querySelector('[data-kind="video"]').onclick = () => openFiltered("🎬 视频", (b) => b.mime.startsWith("video/"));
-  v.querySelector('[data-kind="motion"]').onclick = () => openFiltered("🎞 动态照片", motions);
-  v.querySelector('[data-kind="orphan"]').onclick = () => openFiltered("📦 未入相册", orphans);
+  v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("最近添加", recent);
+  v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("照片", (b) => b.mime.startsWith("image/"));
+  v.querySelector('[data-kind="video"]').onclick = () => openFiltered("视频", (b) => b.mime.startsWith("video/"));
+  v.querySelector('[data-kind="motion"]').onclick = () => openFiltered("动态照片", motions);
+  v.querySelector('[data-kind="orphan"]').onclick = () => openFiltered("未入相册", orphans);
   // 地点卡片 → 地图探索页（点击地图上的缩略图簇进入对应照片）
   v.querySelectorAll("[data-place]").forEach((c) => {
     c.onclick = () => { sessionStorage.setItem("map_place", c.dataset.place); location.hash = "#/map"; };
@@ -1064,7 +1068,7 @@ async function viewMap() {
     <div id="mp-map" style="height:calc(100vh - 230px);border-radius:12px;z-index:1"></div>`;
   $("mp-back").onclick = () => { sessionStorage.removeItem("map_place"); location.hash = "#/explore"; };
   if ($("mp-all")) $("mp-all").onclick = () => { sessionStorage.removeItem("map_place"); viewMap(); };
-  if ($("mp-list")) $("mp-list").onclick = () => openFiltered(place ? `📍 ${place}` : "🗺 全部地点", gps);
+  if ($("mp-list")) $("mp-list").onclick = () => openFiltered(place ? `${place}` : "全部地点", gps);
   $("mp-src").onchange = (e) => { localStorage.setItem("hs_map_source", e.target.value); viewMap(); };
 
   const map = L.map("mp-map", { attributionControl: true });
@@ -1094,7 +1098,7 @@ async function viewMap() {
       m.on("click", () => {
         if (g.items.length === 1) { openViewer(g.items[0]); }
         else if (map.getZoom() < maxZoom) { map.fitBounds(L.latLngBounds(g.items.map((b) => [b.gps_lat, b.gps_lon])).pad(0.15), { maxZoom }); }
-        else { openFiltered("📍 此处照片", [...g.items].sort((a, b) => b.taken_at - a.taken_at)); }
+        else { openFiltered("此处照片", [...g.items].sort((a, b) => b.taken_at - a.taken_at)); }
       });
     }
   };
@@ -1133,7 +1137,7 @@ async function viewFavorites() {
   const favs = blobs.filter((b) => b.favorite);
   const v = $("view");
   v.innerHTML = `
-    <div class="row"><h2 style="margin:6px 0">⭐ 收藏夹</h2><span class="badge">${favs.length} 张</span></div>
+    <div class="row"><h2 style="margin:6px 0"><svg class="ic"><use href="#i-favorites"/></svg> 收藏夹</h2><span class="badge">${favs.length} 张</span></div>
     <div class="grid" id="fav-grid"></div>`;
   const grid = $("fav-grid");
   if (favs.length === 0) { v.innerHTML = `<p class="hint">还没有收藏。右键照片 → 收藏。</p>`; return; }
@@ -1175,14 +1179,14 @@ async function viewAlbums() {
     <div class="album-wall" id="wall">
       ${list.map((a) => `
         <div class="album-card" data-id="${a.id}" style="position:relative">
-          <span class="check" data-aid="${a.id}"><svg class="ic" style="width:12px;height:12px"><use href="#i-explore"/></svg></span>
+          <span class="check" data-aid="${a.id}">✓</span>
           <div class="cov">${covers[a.id] ? `<img src="/api/blobs/${covers[a.id]}/thumbnail?token=${encodeURIComponent(token)}">` : `<div style="display:grid;place-items:center;height:100%"><svg class="ic" style="width:34px;height:34px"><use href="#i-albums"/></svg></div>`}</div>
           <div class="nm"><span>${a.name}</span><span class="cnt">${a.blob_count} 张</span></div>
         </div>`).join("")}
     </div>
     <div class="selbar" id="album-selbar" style="display:none">
       <span style="font-weight:600">已选 <span id="asel-count">0</span> 个相册</span>
-      <button id="asel-share">🔗 分享</button>
+      <button id="asel-share"><svg class="ic"><use href="#i-shares"/></svg>分享</button>
       <button class="danger" id="asel-delete">🗑 删除相册</button>
       <button id="asel-cancel">取消</button>
     </div>`;
@@ -1547,7 +1551,7 @@ async function viewAdminUsers() {
     <div class="album-wall" id="user-wall">
       ${users.map(card).join("")}
       <div class="album-card" style="border:2px dashed var(--border);display:grid;place-items:center;min-height:220px;cursor:pointer" onclick="addUserDialog()">
-        <div style="text-align:center"><div style="font-size:34px">＋👤</div><div style="font-weight:600;margin-top:6px">添加用户</div></div>
+        <div style="text-align:center"><svg class="ic" style="width:34px;height:34px;color:var(--primary)"><use href="#i-plus-user"/></svg><div style="font-weight:600;margin-top:6px">添加用户</div></div>
       </div>
     </div>`;
 }
@@ -1689,7 +1693,7 @@ async function viewAdminGroups() {
           </div>
         </div>`).join("")}
       <div class="album-card" style="border:2px dashed var(--border);display:grid;place-items:center;min-height:220px;cursor:pointer" onclick="addGroupDialog()">
-        <div style="text-align:center"><div style="font-size:34px">＋🏷</div><div style="font-weight:600;margin-top:6px">创建组</div></div>
+        <div style="text-align:center"><svg class="ic" style="width:34px;height:34px;color:var(--primary)"><use href="#i-groups"/></svg><div style="font-weight:600;margin-top:6px">创建组</div></div>
       </div>
     </div>`;
 }
@@ -1973,19 +1977,65 @@ window.delStorage = (id) => {
 // ---------------- 管理：系统状态 ----------------
 async function viewAdminStatus() {
   const st = await api("/api/admin/status");
+  let blobs = [];
+  try { blobs = await api("/api/blobs"); } catch {}
+  const photos = blobs.filter((b) => b.mime.startsWith("image/") && !b.is_motion).length;
+  const videos = blobs.filter((b) => b.mime.startsWith("video/")).length;
+  const motions = blobs.filter((b) => b.is_motion).length;
+  const gb = blobs.reduce((s, b) => s + (b.total_len || 0), 0) / 1073741824;
+
+  // 统计条形图（手绘 SVG，色彩与桌面端一致）
+  const stats = [
+    { k: "用户", v: st.users, c: "#5b8def" },
+    { k: "用户组", v: st.groups, c: "#9b8def" },
+    { k: "相册", v: st.albums, c: "#7ed6a0" },
+    { k: "照片", v: st.blobs, c: "#f0b45c" },
+    { k: "回收站", v: st.trash, c: "#ef6a6a" },
+    { k: "分享", v: st.shares, c: "#5bc8de" },
+    { k: "同步源", v: st.sources, c: "#c9a3ff" },
+  ];
+  const maxV = Math.max(1, ...stats.map((x) => x.v));
+  const barSvg = `<svg viewBox="0 0 360 150" style="width:100%;height:auto">` +
+    stats.map((d, i) => {
+      const x = 14 + i * 50, bw = 30;
+      const h = Math.max((d.v / maxV) * 100, 2), y = 118 - h;
+      return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="6" fill="${d.c}"/>` +
+        `<text x="${x + bw / 2}" y="${y - 6}" text-anchor="middle" font-size="11" fill="currentColor">${d.v}</text>` +
+        `<text x="${x + bw / 2}" y="136" text-anchor="middle" font-size="11" fill="currentColor">${d.k}</text>`;
+    }).join("") + `</svg>`;
+
+  // 媒体构成环形图
+  const pie = [["照片", photos, "#5b8def"], ["视频", videos, "#f0b45c"], ["动态", motions, "#7ed6a0"]].filter((d) => d[1] > 0);
+  const totalP = pie.reduce((s, d) => s + d[1], 0);
+  let acc = -90;
+  const donutSegs = pie.map(([name, v, c]) => {
+    const frac = v / (totalP || 1);
+    const a0 = (acc * Math.PI) / 180;
+    acc += frac * 360;
+    const a1 = (acc * Math.PI) / 180;
+    if (frac >= 0.999) return `<circle cx="60" cy="60" r="44" fill="none" stroke="${c}" stroke-width="16"/>`;
+    const large = frac > 0.5 ? 1 : 0;
+    const x0 = 60 + 44 * Math.cos(a0), y0 = 60 + 44 * Math.sin(a0);
+    const x1 = 60 + 44 * Math.cos(a1), y1 = 60 + 44 * Math.sin(a1);
+    return `<path d="M ${x0.toFixed(2)} ${y0.toFixed(2)} A 44 44 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}" fill="none" stroke="${c}" stroke-width="16"/>`;
+  }).join("");
+  const donutLegend = pie.map(([name, , c]) => `<span class="hint" style="margin-right:10px"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};margin-right:4px"></span>${name}</span>`).join("");
+
+  const mini = stats.map((d) => `
+    <div class="status-mini" style="border-top:3px solid ${d.c}">
+      <div class="v">${d.v}</div><div class="k">${d.k}</div>
+    </div>`).join("");
+
   $("view").innerHTML = `
-    <h2 style="margin:6px 0">系统状态</h2>
-    <table class="admin">
-      <tr><th>用户</th><td>${st.users}</td></tr>
-      <tr><th>用户组</th><td>${st.groups}</td></tr>
-      <tr><th>相册</th><td>${st.albums}</td></tr>
-      <tr><th>照片</th><td>${st.blobs}</td></tr>
-      <tr><th>回收站</th><td>${st.trash}</td></tr>
-      <tr><th>分享</th><td>${st.shares}</td></tr>
-      <tr><th>同步源</th><td>${st.sources}</td></tr>
-      <tr><th>同步间隔</th><td>${st.sync_interval_secs > 0 ? `${st.sync_interval_secs} 秒` : "关闭（仅手动）"}</td></tr>
-    </table>
-    <div class="form-card"><span class="hint">手动触发一次全源同步：</span><button class="primary" id="sync-run"><svg class="ic"><use href="#i-refresh"/></svg>立即同步</button><span id="sync-out" class="hint"></span></div>`;
+    <div class="row"><h2 style="margin:6px 0">系统状态</h2>${totalP ? `<span class="badge">库内 ${totalP} 个文件 · ${gb.toFixed(2)} GB</span>` : ""}<span style="flex:1"></span><button class="icon-btn" title="刷新" onclick="route()"><svg class="ic"><use href="#i-refresh"/></svg></button></div>
+    <div class="status-mini-row">${mini}</div>
+    <div class="status-charts">
+      <div class="status-card"><h3>库内统计</h3><div style="color:var(--muted)">${barSvg}</div></div>
+      <div class="status-card"><h3>媒体构成</h3>
+        ${totalP ? `<div style="display:flex;align-items:center;gap:18px;color:var(--muted)"><div>${donutSvgWrap(donutSegs, totalP)}</div><div>${donutLegend}</div></div>` : `<p class="hint">暂无照片数据</p>`}
+      </div>
+    </div>
+    <div class="form-card"><span class="hint">同步间隔：${st.sync_interval_secs > 0 ? `${st.sync_interval_secs} 秒` : "关闭（仅手动）"}。手动触发一次全源同步：</span><button class="primary" id="sync-run"><svg class="ic"><use href="#i-refresh"/></svg>立即同步</button><span id="sync-out" class="hint"></span></div>`;
   $("sync-run").onclick = async () => {
     $("sync-out").textContent = "同步中…";
     try {
@@ -1993,6 +2043,102 @@ async function viewAdminStatus() {
       $("sync-out").textContent = report.map((r) => `${r.source}：新增 ${r.added} · 移动 ${r.moved} · 删除 ${r.removed}`).join("；");
     } catch (e) { $("sync-out").textContent = e.message; }
   };
+}
+function donutSvgWrap(segs, totalP) {
+  const inner = totalP === 1 ? `<circle cx="60" cy="60" r="44" fill="none" stroke="#5b8def" stroke-width="16"/>` : segs;
+  return `<svg viewBox="0 0 120 120" style="width:150px;height:150px">${inner}<text x="60" y="65" text-anchor="middle" font-size="15" fill="currentColor">${totalP}</text></svg>`;
+}
+
+// ---------------- 设置（网页端；与桌面端本地设置对齐） ----------------
+async function viewSettings() {
+  const v = $("view");
+  const theme = localStorage.getItem("hs_theme") || "dark";
+  const mapSrc = localStorage.getItem("hs_map_source") || "osm";
+  const amapKey = localStorage.getItem("hs_amap_key") || "";
+  let st = null;
+  if (me.is_admin) { try { st = await api("/api/admin/settings"); } catch {} }
+  v.innerHTML = `
+    <div class="row"><h2 style="margin:6px 0"><svg class="ic"><use href="#i-settings"/></svg> 设置</h2><span style="flex:1"></span><button class="icon-btn" title="刷新" onclick="route()"><svg class="ic"><use href="#i-refresh"/></svg></button></div>
+
+    <div class="form-card" style="flex-direction:column;align-items:flex-start">
+      <strong>外观</strong>
+      <label class="hint">主题 <select id="set-theme">
+        <option value="dark" ${theme === "dark" ? "selected" : ""}>深色</option>
+        <option value="light" ${theme === "light" ? "selected" : ""}>浅色</option>
+      </select></label>
+      <label class="hint">地图源（探索地点 / 地图视图） <select id="set-map">
+        ${MAP_SOURCES.map((m) => `<option value="${m.id}" ${m.id === mapSrc ? "selected" : ""}>${m.label}</option>`).join("")}
+      </select></label>
+      <label class="hint" style="width:100%">高德 Web 服务 Key（地点显示为城市名，可选）
+        <input id="set-amap" value="${amapKey}" placeholder="高德开放平台申请（类型选 Web 服务）" style="width:100%">
+      </label>
+    </div>
+
+    <div class="form-card" style="flex-direction:column;align-items:flex-start">
+      <strong>账号</strong>
+      <div class="row">
+        <input id="set-pw-old" type="password" placeholder="当前密码">
+        <input id="set-pw-new" type="password" placeholder="新密码">
+        <input id="set-pw-new2" type="password" placeholder="确认新密码">
+        <button id="set-pw-go" class="primary">修改密码</button>
+      </div>
+    </div>
+
+    ${st ? `
+    <div class="form-card" style="flex-direction:column;align-items:flex-start">
+      <strong>存储参数（管理员；只影响新上传）</strong>
+      <div class="row">
+        <label class="hint">默认分片大小 <select id="set-chunk">
+          ${[262144, 524288, 1048576, 2097152, 4194304].map((c) => `<option value="${c}" ${st.chunk_size === c ? "selected" : ""}>${c / 1024} KiB</option>`).join("")}
+        </select></label>
+        <label class="hint">n（总 shard 数） <select id="set-n">
+          ${[2, 4, 6, 8].map((x) => `<option value="${x}" ${st.n === x ? "selected" : ""}>${x}</option>`).join("")}
+        </select></label>
+        <label class="hint">m（恢复阈值） <select id="set-m">
+          ${Array.from({ length: st.n }, (_, i) => i + 1).map((x) => `<option value="${x}" ${st.m === x ? "selected" : ""}>${x}</option>`).join("")}
+        </select></label>
+        <label class="hint">下载并发 <input id="set-conc" type="number" min="1" max="10" value="${st.download_concurrency}" style="width:70px"></label>
+        <button id="set-save" class="primary">保存</button>
+      </div>
+      <p class="hint">存储放大 = n/m。修改分片参数只影响新上传的 blob。</p>
+      <p class="hint" id="set-msg"></p>
+    </div>` : ""}
+  `;
+
+  $("set-theme").onchange = (e) => {
+    localStorage.setItem("hs_theme", e.target.value);
+    document.body.classList.toggle("theme-light", e.target.value === "light");
+    $("menu-theme").textContent = e.target.value === "light" ? "浅色模式" : "深色模式";
+    toast("主题已切换");
+  };
+  $("set-map").onchange = (e) => { localStorage.setItem("hs_map_source", e.target.value); toast("地图源已切换"); };
+  $("set-amap").onchange = (e) => { localStorage.setItem("hs_amap_key", e.target.value.trim()); toast("高德 Key 已保存"); };
+  $("set-pw-go").onclick = async () => {
+    const old = $("set-pw-old").value, nw = $("set-pw-new").value, nw2 = $("set-pw-new2").value;
+    if (!old || !nw || nw !== nw2) { toast("字段为空或两次新密码不一致", true); return; }
+    try {
+      await api("/api/me/password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ old, new: nw }) });
+      toast("密码已修改");
+      $("set-pw-old").value = $("set-pw-new").value = $("set-pw-new2").value = "";
+    } catch (e) { toast(e.message, true); }
+  };
+  if (st) {
+    $("set-n").onchange = (e) => {
+      const nN = Number(e.target.value);
+      const sel = $("set-m");
+      sel.innerHTML = Array.from({ length: nN }, (_, i) => i + 1).map((x) => `<option value="${x}" ${x === Math.min(st.m, nN) ? "selected" : ""}>${x}</option>`).join("");
+    };
+    $("set-save").onclick = async () => {
+      try {
+        await api("/api/admin/settings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chunk_size: Number($("set-chunk").value), n: Number($("set-n").value), m: Number($("set-m").value), download_concurrency: Number($("set-conc").value) }),
+        });
+        $("set-msg").textContent = "已保存。修改分片参数只影响新上传。";
+      } catch (e) { $("set-msg").textContent = e.message; $("set-msg").style.color = "var(--danger)"; }
+    };
+  }
 }
 
 // ---------------- PWA ----------------

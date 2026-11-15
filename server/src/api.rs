@@ -1246,6 +1246,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/admin/groups", get(crate::admin::list_groups).post(crate::admin::set_groups))
         .route("/api/admin/sources", get(crate::admin::list_sources).post(crate::admin::set_sources))
         .route("/api/admin/status", get(crate::admin::status))
+        .route("/api/admin/settings", get(crate::admin::get_settings).post(crate::admin::update_settings))
         .route("/api/admin/storage", get(crate::storage::list_storage).post(crate::storage::add_storage))
         .route("/api/admin/storage/{id}", axum::routing::delete(crate::storage::remove_storage))
         .route("/api/admin/storage/verify", post(crate::storage::verify_storage))
