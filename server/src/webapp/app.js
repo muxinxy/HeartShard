@@ -1187,7 +1187,7 @@ async function viewAlbums() {
     <div class="selbar" id="album-selbar" style="display:none">
       <span style="font-weight:600">已选 <span id="asel-count">0</span> 个相册</span>
       <button id="asel-share"><svg class="ic"><use href="#i-shares"/></svg>分享</button>
-      <button class="danger" id="asel-delete">🗑 删除相册</button>
+      <button class="danger" id="asel-delete"><svg class="ic"><use href="#i-trash"/></svg>删除相册</button>
       <button id="asel-cancel">取消</button>
     </div>`;
   v.querySelectorAll(".album-card").forEach((el) => {
@@ -1296,7 +1296,7 @@ async function renderAlbumDetail() {
   blobs = await api(`/api/albums/${currentAlbum}/blobs`);
   const v = $("view");
   v.innerHTML = `
-    <div class="row"><h2 style="margin:6px 0">📁 ${a.name}</h2>
+    <div class="row"><h2 style="margin:6px 0"><svg class="ic"><use href="#i-albums"/></svg> ${a.name}</h2>
       <span class="badge">${blobs.length} 张</span>
       <span style="flex:1"></span>
       <button id="acl-btn">权限</button>
@@ -1318,7 +1318,7 @@ async function openAclEditor(a) {
   const PERM_LABEL = { none: "隐藏", view: "只看", upload: "上传", manage: "管理" };
   const isRoot = !a.parent_id;
   const rowFor = (kind, id, label, cur) => `
-    <tr><td>${kind === "user" ? "👤" : "🏷"} ${label}</td><td>${cur ? PERM_LABEL[cur] || cur : "继承"}</td><td>
+    <tr><td><svg class="ic"><use href=${kind === "user" ? "#i-users" : "#i-groups"}/></svg> ${label}</td><td>${cur ? PERM_LABEL[cur] || cur : "继承"}</td><td>
       <select onchange="setAcl('${a.id}','${kind}','${id}',this.value)">
         <option value="">继承</option>
         ${["none", "view", "upload", "manage"].map((p) => `<option value="${p}" ${cur === p ? "selected" : ""}>${PERM_LABEL[p]}</option>`).join("")}
@@ -1335,8 +1335,8 @@ async function openAclEditor(a) {
     <h3>权限：${a.name}</h3>
     ${isRoot ? `<p class="hint">根相册没有父级可继承——未显式设置权限的用户/组将看不到此相册（管理员始终可见）。创建根相册时已默认授予 family 组「管理」。</p>` : `<p class="hint">子相册默认继承上级权限；显式设置覆盖继承；同一层级用户设置优先于组。</p>`}
     <div class="row" style="margin:8px 0">
-      <button class="primary" id="acl-tab-user">👤 用户</button>
-      <button id="acl-tab-group">🏷 用户组</button>
+      <button class="primary" id="acl-tab-user"><svg class="ic"><use href="#i-users"/></svg> 用户</button>
+      <button id="acl-tab-group"><svg class="ic"><use href="#i-groups"/></svg> 用户组</button>
     </div>
     <table class="admin" id="acl-users"><tr><th>对象</th><th>当前</th><th>设置</th></tr>${userRows}</table>
     <table class="admin" id="acl-groups" style="display:none"><tr><th>对象</th><th>当前</th><th>设置</th></tr>${groupRows}</table>`);
@@ -1586,7 +1586,7 @@ async function userDialog(existing) {
     </div>
     ${albums.length > 0 ? `<label class="hint">相册权限（默认 = 继承）</label>
     <table class="admin">${albums.map((a) => `
-      <tr><td>📁 ${a.name}</td><td>
+      <tr><td><svg class="ic"><use href="#i-albums"/></svg> ${a.name}</td><td>
         <select id="ud-acl-${a.id}">
           <option value="">继承</option>
           ${["none", "view", "upload", "manage"].map((p) => `<option value="${p}" ${aclOf[a.id] === p ? "selected" : ""}>${PERM_LABEL[p]}</option>`).join("")}
@@ -1736,7 +1736,7 @@ window.editGroup = async (gid) => {
     </div>
     ${albums.length > 0 ? `<label class="hint">组对各相册的权限（默认 = 继承）</label>
     <table class="admin">${albums.map((a) => `
-      <tr><td>📁 ${a.name}</td><td>
+      <tr><td><svg class="ic"><use href="#i-albums"/></svg> ${a.name}</td><td>
         <select id="eg-acl-${a.id}">
           <option value="">继承</option>
           ${["none", "view", "upload", "manage"].map((p) => `<option value="${p}" ${aclOf[a.id] === p ? "selected" : ""}>${PERM_LABEL[p]}</option>`).join("")}
