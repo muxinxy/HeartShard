@@ -36,7 +36,34 @@ pub async fn list_users(State(state): State<Arc<AppState>>, headers: HeaderMap) 
         return e;
     }
     match state.users.list_users() {
-        Ok(users) => Json(users).into_response(),
+        Ok(users) => Json(users
+            .iter()
+            .map(|u| serde_json::json!({
+                "id": u.uid,
+                "name": u.name,
+                "avatar": u.avatar,
+                "is_admin": u.is_admin,
+                "enabled": u.enabled,
+                // 不外泄密钥本体，只暴露状态
+                "totp_enabled": !u.totp_secret.is_empty(),
+            }))
+            .collect::<Vec<_>>())
+        .into_response(),
+        Err(e) => s_err(e),
+    }
+}
+
+/// POST /api/admin/users/{uid}/reset-totp —— 管理员关闭任意成员的两步验证。
+pub async fn admin_reset_totp(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPathT(uid): AxumPathT<String>,
+) -> Response {
+    if let Err(e) = require_admin(&state, &headers) {
+        return e;
+    }
+    match state.users.reset_totp_by_name(&uid) {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => s_err(e),
     }
 }

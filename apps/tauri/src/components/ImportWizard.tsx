@@ -70,17 +70,18 @@ export function ImportWizard({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="wizard">
-      <header className="toolbar">
-        <span className="brand">目录导入向导</span>
-        <span className="spacer" />
+      <div className="view-head">
+        <h2>目录导入向导</h2>
+        <span style={{ flex: 1 }} />
         <button
+          className="back-btn"
           onClick={() => {
             onDone();
           }}
         >
           关闭
         </button>
-      </header>
+      </div>
 
       {error && <div className="notice error">{error}</div>}
 

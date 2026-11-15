@@ -70,11 +70,11 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="wizard">
-      <header className="toolbar">
-        <span className="brand">设置</span>
-        <span className="spacer" />
-        <button onClick={onDone}>返回</button>
-      </header>
+      <div className="view-head">
+        <h2>设置</h2>
+        <span style={{ flex: 1 }} />
+        <button className="back-btn" onClick={onDone}>返回</button>
+      </div>
 
       {saveMsg && <div className="notice">{saveMsg}</div>}
 

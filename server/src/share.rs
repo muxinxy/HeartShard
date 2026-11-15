@@ -435,9 +435,7 @@ pub async fn share_meta(
     let Some(share) = state.shares.get(&id) else {
         return err(StatusCode::NOT_FOUND, "分享不存在");
     };
-    if let Err(e) = check_expired(&share) {
-        return e;
-    }
+    // 已过期仍可读清单（仅元信息）；密钥/密文端点继续拦截
     if let Err(e) = check_code(&share, code.get("code").map(|s| s.as_str())) {
         return e;
     }

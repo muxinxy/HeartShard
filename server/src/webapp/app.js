@@ -949,13 +949,14 @@ async function viewExplore() {
   const motions = all.filter((b) => b.is_motion);
   const placeList = [...places.entries()].sort((a, b) => b[1].length - a[1].length);
   const v = $("view");
-  const card = (dataAttr, iconId, label, cnt) => {
-    const iconSvg = iconId
-      ? `<svg class="ic" style="width:36px;height:36px"><use href="#i-${iconId}"/></svg>`
-      : "";
+  const card = (dataAttr, iconId, label, cnt, cover) => {
+    // 有内容显示首张缩略图；空集合才显示图标
+    const cov = cover
+      ? `<img src="/api/blobs/${cover}/thumbnail?token=${encodeURIComponent(token)}" style="width:100%;height:100%;object-fit:cover">`
+      : `<svg class="ic" style="width:36px;height:36px"><use href="#i-${iconId}"/></svg>`;
     return `
     <div class="album-card" ${dataAttr}>
-      <div class="cov" style="display:grid;place-items:center">${iconSvg}</div>
+      <div class="cov" style="display:grid;place-items:center;overflow:hidden">${cov}</div>
       <div class="nm"><span>${label}</span><span class="cnt">${cnt}</span></div>
     </div>`;
   };
@@ -963,17 +964,17 @@ async function viewExplore() {
     <h2 style="margin:6px 0">探索</h2>
     <h3 class="day-header">类别</h3>
     <div class="album-wall" id="exp-kinds">
-      ${card('data-kind="recent"', "recent", "最近添加", recent.length)}
-      ${card('data-kind="photo"', "image", "照片", photos.length)}
-      ${card('data-kind="video"', "video", "视频", videos.length)}
-      ${card('data-kind="motion"', "motion", "动态照片", motions.length)}
-      ${card('data-kind="orphan"', "box", "未入相册", orphans.length)}
+      ${card('data-kind="recent"', "recent", "最近添加", recent.length, recent[0]?.blob_hash)}
+      ${card('data-kind="photo"', "image", "照片", photos.length, photos[0]?.blob_hash)}
+      ${card('data-kind="video"', "video", "视频", videos.length, videos[0]?.blob_hash)}
+      ${card('data-kind="motion"', "motion", "动态照片", motions.length, motions[0]?.blob_hash)}
+      ${card('data-kind="orphan"', "box", "未入相册", orphans.length, orphans[0]?.blob_hash)}
     </div>
     <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）${placeList.length ? `<a id="places-all" class="hint" style="cursor:pointer;margin-left:10px">🗺 地图查看全部</a>` : ""}</h3>
     ${placeList.length === 0
       ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
       : `<div class="album-wall" id="exp-places">
-          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length)).join("")}
+          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length, items[0]?.blob_hash)).join("")}
         </div>`}`;
   v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("最近添加", recent);
   v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("照片", (b) => b.mime.startsWith("image/"));
@@ -989,15 +990,15 @@ async function viewExplore() {
   }
 }
 // 过滤结果按时间线排列（按天分组 + 日期头）
-function openFiltered(title, predOrItems) {
+function openFiltered(title, predOrItems, backHash = "#/explore") {
   const list = Array.isArray(predOrItems) ? predOrItems : blobs.filter(predOrItems);
   const v = $("view");
   v.innerHTML = `
     <div class="row"><h2 style="margin:6px 0">${title}</h2><span class="badge">${list.length} 张</span>
-      <button style="margin-left:auto" id="back-explore">← 返回探索</button></div>
+      <button class="back-btn" style="margin-left:auto" id="back-explore">← 返回</button></div>
     <div id="filtered-body"></div>`;
   // 绑定返回事件必须先于空列表 early-return（否则空页面上按钮无事件）
-  $("back-explore").onclick = () => { location.hash = "#/explore"; route(); };
+  $("back-explore").onclick = () => { location.hash = backHash; route(); };
   const body = $("filtered-body");
   const groups = groupByDay(list);
   currentGroups = groups;
@@ -1068,7 +1069,7 @@ async function viewMap() {
     <div id="mp-map" style="height:calc(100vh - 230px);border-radius:12px;z-index:1"></div>`;
   $("mp-back").onclick = () => { sessionStorage.removeItem("map_place"); location.hash = "#/explore"; };
   if ($("mp-all")) $("mp-all").onclick = () => { sessionStorage.removeItem("map_place"); viewMap(); };
-  if ($("mp-list")) $("mp-list").onclick = () => openFiltered(place ? `${place}` : "全部地点", gps);
+  if ($("mp-list")) $("mp-list").onclick = () => openFiltered(place ? `${place}` : "全部地点", gps, "#/map");
   $("mp-src").onchange = (e) => { localStorage.setItem("hs_map_source", e.target.value); viewMap(); };
 
   const map = L.map("mp-map", { attributionControl: true });
@@ -1098,7 +1099,7 @@ async function viewMap() {
       m.on("click", () => {
         if (g.items.length === 1) { openViewer(g.items[0]); }
         else if (map.getZoom() < maxZoom) { map.fitBounds(L.latLngBounds(g.items.map((b) => [b.gps_lat, b.gps_lon])).pad(0.15), { maxZoom }); }
-        else { openFiltered("此处照片", [...g.items].sort((a, b) => b.taken_at - a.taken_at)); }
+        else { openFiltered("此处照片", [...g.items].sort((a, b) => b.taken_at - a.taken_at), "#/map"); }
       });
     }
   };
@@ -1151,6 +1152,8 @@ async function viewAlbums() {
   const v = $("view");
   const covers = {};
   for (const a of albums.slice(0, 200)) {
+    // 优先显式封面（右键相册 → 修改封面设置的）；否则回退第一张
+    if (a.cover_hash) { covers[a.id] = a.cover_hash; continue; }
     try {
       const list = await api(`/api/albums/${a.id}/blobs`);
       const imgs = list.filter((b) => b.mime.startsWith("image/"));
@@ -1394,7 +1397,7 @@ async function viewShares() {
         <td>${s.expired ? '<span class="badge" style="color:var(--danger)">已失效</span>' : '<span class="badge" style="color:var(--success)">有效</span>'}</td>
         <td><button onclick="showShareList('${s.id}')">查看内容</button></td>
         <td class="row">
-          <button onclick="copyShare('${s.id}')">复制链接</button>
+          <button onclick="copyShare('${s.id}', this)">复制链接</button>
           ${s.expired ? "" : `<button class="danger" onclick="cancelShare('${s.id}')">取消分享</button>`}
         </td></tr>`).join("")}
     </table>
@@ -1404,9 +1407,12 @@ async function viewShares() {
       <button ${sharePage === pages - 1 ? "disabled" : ""} id="sh-next">下一页 ›</button>
     </div>` : ""}`}`;
   const updateBar = () => {
-    const n = document.querySelectorAll(".sh-check:checked").length;
+    const checks = [...document.querySelectorAll(".sh-check")];
+    const n = checks.filter((c) => c.checked).length;
     $("sh-copy").style.display = n > 0 ? "inline-block" : "none";
     $("sh-del").style.display = n > 0 ? "inline-block" : "none";
+    // 全选框联动：手动逐条勾满/取消也要同步表头
+    if ($("sh-all")) $("sh-all").checked = checks.length > 0 && n === checks.length;
   };
   document.querySelectorAll(".sh-check").forEach((c) => { c.onchange = updateBar; });
   const all = $("sh-all");
@@ -1434,8 +1440,20 @@ async function viewShares() {
   const next = $("sh-next");
   if (next) next.onclick = () => { sharePage++; route(); };
 }
-window.copyShare = async (id) => {
+window.copyShare = async (id, btn) => {
   await navigator.clipboard.writeText(location.origin + `/s/${id}`).catch(() => {});
+  // 复制成功反馈：按钮变蓝色 ✓，1 秒后恢复
+  if (btn) {
+    const orig = btn.innerHTML;
+    btn.classList.add("primary");
+    btn.textContent = "✓ 已复制";
+    btn.disabled = true;
+    setTimeout(() => {
+      btn.classList.remove("primary");
+      btn.innerHTML = orig;
+      btn.disabled = false;
+    }, 1000);
+  }
   toast("链接已复制");
 };
 window.cancelShare = (id) => {
@@ -1452,13 +1470,13 @@ window.showShareList = async (id) => {
     let meta;
     try { meta = JSON.parse(body); } catch { throw new Error(body || `HTTP ${res.status}`); }
     if (!res.ok) throw new Error(meta.error || `HTTP ${res.status}`);
-    modal(`<h3>分享内容：${meta.album}</h3>
+    modal(`<h3 style="margin:6px 0 16px">分享内容：${meta.album}</h3>
       <table class="admin">${(meta.files || []).map((f) => `
         <tr><td>${f.name}</td>
-        <td>${new Date((f.taken_at || 0) * 1000).toLocaleDateString()}</td>
+        <td style="white-space:nowrap">${new Date((f.taken_at || 0) * 1000).toLocaleDateString()}</td>
         <td style="white-space:nowrap"><span class="badge">${f.sanitized ? "已去元数据" : "含元数据"}</span></td>
-        <td>${f.mime.startsWith("image/") || f.mime.startsWith("video/") ? `<button onclick='previewShared(${JSON.stringify(JSON.stringify(f))})'>预览</button>` : ""}</td></tr>`).join("")}</table>
-      <div class="row" style="justify-content:flex-end"><button onclick="closeModal()">关闭</button></div>`);
+        <td style="white-space:nowrap">${f.mime.startsWith("image/") || f.mime.startsWith("video/") ? `<button onclick='previewShared(${JSON.stringify(JSON.stringify(f))})'>预览</button>` : ""}</td></tr>`).join("")}</table>
+      <div class="row" style="justify-content:flex-end;margin-top:16px"><button onclick="closeModal()">关闭</button></div>`);
   } catch (e) { toast(e.message || "加载失败", true); }
 };
 // 分享清单预览（所有者侧走 /api/blobs/{hash}/raw）
@@ -1539,10 +1557,11 @@ async function viewAdminUsers() {
       <div class="cov" style="background:var(--primary);display:grid;place-items:center;position:relative">
         ${u.avatar ? `<img src="${u.avatar}" style="width:84px;height:84px;border-radius:50%;object-fit:cover">` : `<div class="avatar" style="width:84px;height:84px;font-size:32px;background:rgba(255,255,255,.25)">${u.name.slice(0, 1)}</div>`}
       </div>
-      <div class="nm"><span>${u.name}${u.is_admin ? ' <span class="badge">管理员</span>' : ""}${u.enabled === false ? ' <span class="badge" style="color:var(--danger)">已禁用</span>' : ""}</span></div>
+      <div class="nm"><span>${u.name}${u.is_admin ? ' <span class="badge">管理员</span>' : ""}${u.enabled === false ? ' <span class="badge" style="color:var(--danger)">已禁用</span>' : ""}${u.totp_enabled ? ' <span class="badge" style="color:var(--warn)">2FA</span>' : ""}</span></div>
       <div class="row" style="padding:0 10px 10px">
         <button onclick="editUser('${u.uid}')"><svg class="ic"><use href="#i-edit"/></svg>编辑</button>
         <button onclick="resetPw('${u.uid}','${u.name}')"><svg class="ic"><use href="#i-lock"/></svg>重置密码</button>
+        ${u.totp_enabled ? `<button onclick="resetTotp('${u.uid}','${u.name}')">重置两步验证</button>` : ""}
         <button class="danger" onclick="delUser('${u.uid}','${u.name}')"><svg class="ic"><use href="#i-trash"/></svg>删除</button>
       </div>
     </div>`;
@@ -1565,7 +1584,7 @@ async function userDialog(existing) {
   if (uid) {
     for (const a of albums) {
       const entries = await api(`/api/albums/${a.id}/acl`).catch(() => []);
-      const hit = entries.find((e) => e.principal.kind === "user" && e.principal.id === uid);
+      const hit = entries.find((e) => (e.principal.type === "user" || e.principal.kind === "user") && e.principal.id === uid);
       aclOf[a.id] = hit ? hit.perm : "";
     }
   }
@@ -1786,6 +1805,15 @@ window.editGroup = async (gid) => {
     } catch (e) { toast(e.message, true); }
   };
 };
+window.resetTotp = (uid, name) => {
+  uiConfirm("重置两步验证", `关闭「${name}」的两步验证？其下次登录将不再要求验证码。`, async () => {
+    try {
+      await api(`/api/admin/users/${uid}/reset-totp`, { method: "POST" });
+      toast("两步验证已关闭");
+      route();
+    } catch (e) { toast(e.message, true); }
+  }, true);
+};
 window.delGroup = (gid, name) => {
   uiConfirm("删除用户组", `删除组「${name}」？`, async () => {
     const cur = (await api("/api/admin/groups")).filter((g) => g.gid !== gid);
@@ -1810,27 +1838,29 @@ async function viewAdminSources() {
     <h2 style="margin:6px 0">同步源</h2>
     <p class="hint">同步源由后台按计划自动执行（append=只新增 / mirror=镜像；删除 keep/trash）。修改保存后下一轮生效，或到系统状态页手动触发。</p>
     <div id="src-list">${sources.map(srcCard).join("") || `<p class="hint">还没有同步源。</p>`}</div>
-    <div class="form-card">
+    <div class="form-card vcol">
       <strong>新增源：</strong>
-      <input id="ns-id" placeholder="id（如 phone）">
-      <select id="ns-kind"><option value="local">本地目录</option><option value="s3">S3 兼容</option><option value="webdav">WebDAV</option><option value="openlist">OpenList</option></select>
-      <input id="ns-root" placeholder="本地路径 / 端点 URL">
-      <select id="ns-strategy"><option value="append">append 仅新增</option><option value="mirror">mirror 镜像</option></select>
-      <select id="ns-del"><option value="keep">删除保留</option><option value="trash">删除进回收站</option></select>
-      <button class="primary" id="ns-add">添加</button>
+      <label class="f">源 ID（如 phone）<input id="ns-id" placeholder="id（如 phone）"></label>
+      <div class="frow">
+        <label class="f">类型 <select id="ns-kind"><option value="local">本地目录</option><option value="s3">S3 兼容</option><option value="webdav">WebDAV</option><option value="openlist">OpenList</option></select></label>
+        <label class="f">策略 <select id="ns-strategy"><option value="append">append 仅新增</option><option value="mirror">mirror 镜像</option></select></label>
+        <label class="f">删除 <select id="ns-del"><option value="keep">删除保留</option><option value="trash">删除进回收站</option></select></label>
+      </div>
+      <label class="f">本地路径 / 端点 URL <input id="ns-root" placeholder="本地路径 / 端点 URL"></label>
+      <div class="row"><button class="primary" id="ns-add">添加</button></div>
     </div>
-    <div class="form-card" id="ns-creds" style="display:none">
+    <div class="form-card vcol" id="ns-creds" style="display:none">
       <strong>凭据：</strong>
-      <input id="ns-bucket" placeholder="bucket" style="display:none">
-      <input id="ns-user" placeholder="用户名" style="display:none">
-      <input id="ns-pass" placeholder="密码" style="display:none">
-      <input id="ns-token" placeholder="令牌（OpenList 管理后台生成）" style="display:none">
-      <input id="ns-base" placeholder="base_path（默认 /heartshard）" style="display:none">
+      <label class="f">bucket <input id="ns-bucket" placeholder="bucket" style="display:none"></label>
+      <label class="f">用户名 <input id="ns-user" placeholder="用户名" style="display:none"></label>
+      <label class="f">密码 <input id="ns-pass" type="password" placeholder="密码" style="display:none"></label>
+      <label class="f">令牌 <input id="ns-token" placeholder="令牌（OpenList 管理后台生成）" style="display:none"></label>
+      <label class="f">base_path <input id="ns-base" placeholder="base_path（默认 /heartshard）" style="display:none"></label>
     </div>
     <p class="hint">远端源（S3/WebDAV/OpenList）的凭据经表单提交后由后台加密落库，不会明文展示。</p>`;
   const credRender = () => {
     const k = $("ns-kind").value;
-    const show = (id, on) => ($(id).style.display = on ? "inline-block" : "none");
+    const show = (id, on) => ($(id).parentElement.style.display = on ? "flex" : "none");
     show("ns-bucket", k === "s3");
     show("ns-user", k === "s3" || k === "webdav");
     show("ns-pass", k === "s3" || k === "webdav");
@@ -1893,32 +1923,34 @@ async function viewAdminStorage() {
           <button class="danger" onclick="delStorage('${s.id}')">删除</button>
         </td></tr>`).join("") || `<tr><td colspan="3" class="hint">还没有 Storage。</td></tr>`}
     </table>
-    <div class="form-card" style="display:block">
+    <div class="form-card vcol" style="display:block">
       <strong>添加 Storage</strong>
-      <div class="row" style="margin-top:8px">
-        <select id="st-kind">
+      <div class="frow">
+        <label class="f">类型 <select id="st-kind">
           <option value="local">本地目录</option>
           <option value="s3">S3 兼容</option>
           <option value="webdav">WebDAV</option>
           <option value="openlist">OpenList</option>
-        </select>
-        <input id="st-id" placeholder="名称（可选，默认自动）">
-        <input id="st-root" placeholder="本地目录路径">
+        </select></label>
+        <label class="f">名称（可选，默认自动） <input id="st-id" placeholder="名称（可选，默认自动）"></label>
+        <label class="f">本地目录路径 <input id="st-root" placeholder="本地目录路径"></label>
+      </div>
+      <div id="st-extra"></div>
+      <div class="row">
         <button id="st-test">测试连接</button>
         <button class="primary" id="st-add">添加</button>
       </div>
-      <div id="st-extra"></div>
       <p class="hint" id="st-probe"></p>
     </div>`;
   const kindSel = $("st-kind");
   const renderExtra = () => {
     const k = kindSel.value;
-    const f = (id, ph) => `<input id="${id}" placeholder="${ph}" style="min-width:220px">`;
+    const f = (id, ph, label) => `<label class="f">${label || ph} <input id="${id}" placeholder="${ph}" style="min-width:220px"></label>`;
     $("st-extra").innerHTML = {
       local: "",
-      s3: `${f("st-endpoint", "endpoint（https://s3…）")}${f("st-bucket", "bucket")}${f("st-ak", "access_key")}${f("st-sk", "secret_key")}${f("st-region", "region（默认 us-east-1）")}`,
-      webdav: `${f("st-endpoint", "base_url（https://dav…）")}${f("st-user", "用户名")}${f("st-pass", "密码")}`,
-      openlist: `${f("st-endpoint", "base_url（http://…:5244）")}${f("st-token", "令牌（管理后台→个人资料→令牌）")}${f("st-base", "base_path（默认 /heartshard）")}`,
+      s3: `${f("st-endpoint", "endpoint（https://s3…）", "端点")}${f("st-bucket", "bucket", "Bucket")}${f("st-ak", "access_key", "Access Key")}${f("st-sk", "secret_key", "Secret Key")}${f("st-region", "region（默认 us-east-1）", "Region")}`,
+      webdav: `${f("st-endpoint", "base_url（https://dav…）", "Base URL")}${f("st-user", "用户名", "用户名")}${f("st-pass", "密码", "密码")}`,
+      openlist: `${f("st-endpoint", "base_url（http://…:5244）", "Base URL")}${f("st-token", "令牌（管理后台→个人资料→令牌）", "令牌")}${f("st-base", "base_path（默认 /heartshard）", "base_path")}`,
     }[k];
     $("st-root").style.display = k === "local" ? "inline-block" : "none";
     $("st-probe").textContent = "";

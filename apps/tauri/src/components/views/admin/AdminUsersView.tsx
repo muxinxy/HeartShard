@@ -46,6 +46,23 @@ export function AdminUsersView() {
     });
   };
 
+  const resetTotp = (u: AdminUser) => {
+    actions.confirmAsk(
+      "重置两步验证",
+      `关闭「${u.name}」的两步验证？其下次登录将不再要求验证码。`,
+      async () => {
+        try {
+          await api.adminResetTotp(u.id);
+          toast.success("两步验证已关闭");
+          reload();
+        } catch (e) {
+          toast.error(String(e));
+        }
+      },
+      true
+    );
+  };
+
   return (
     <div>
       <div className="view-head">
@@ -70,6 +87,7 @@ export function AdminUsersView() {
                 {u.is_admin && " "}
                 {u.is_admin && <span className="badge ok">管理员</span>}
                 {!u.enabled && <span className="badge bad">已禁用</span>}
+                {u.totp_enabled && <span className="badge warn">2FA</span>}
               </span>
             </div>
             <div className="row" style={{ padding: "0 12px 12px", justifyContent: "center" }}>
@@ -77,6 +95,9 @@ export function AdminUsersView() {
                 <Ic name="i-edit" /> 编辑
               </button>
               <button onClick={() => resetPw(u)}>重置密码</button>
+              {u.totp_enabled && (
+                <button onClick={() => resetTotp(u)}>重置两步验证</button>
+              )}
               <button className="danger" onClick={() => del(u)}>
                 删除
               </button>
@@ -118,11 +139,18 @@ function UserDialog({ existing, onClose, onDone }: { existing: AdminUser | null;
   const busy = useState(false)[0];
 
   useEffect(() => {
-    api.listAlbums().then(setAlbums).catch(() => {});
-    if (existing) {
-      // 现有相册级覆盖（从 ACL 表反查不可行——服务端未提供用户视角；这里仅展示相册列表供显式设置）
-      void existing;
-    }
+    (async () => {
+      const list = await api.listAlbums().catch(() => []);
+      setAlbums(list);
+      // 管理员可查看成员的相册级权限：逐相册读 ACL 预填该用户的显式覆盖
+      if (existing) {
+        for (const a of list) {
+          const entries = await api.getAcl(a.id).catch(() => []);
+          const mine = entries.find((e2) => e2.principal.type === "user" && e2.principal.id === existing.id);
+          if (mine?.perm) setAcl((prev) => ({ ...prev, [a.id]: mine.perm as string }));
+        }
+      }
+    })();
   }, [existing]);
 
   const submit = async () => {

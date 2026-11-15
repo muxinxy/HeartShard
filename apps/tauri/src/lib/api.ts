@@ -216,6 +216,8 @@ export interface AdminUser {
   avatar: string | null;
   is_admin: boolean;
   enabled: boolean;
+  /** 该成员是否已启用两步验证（仅管理端可见状态，不外泄密钥） */
+  totp_enabled?: boolean;
 }
 
 export interface GroupInfo {
@@ -733,6 +735,8 @@ const remoteApi = {
 
   // ---- 管理区 ----
   adminUsers: () => remoteFetch<AdminUser[]>("/api/admin/users"),
+  adminResetTotp: (uid: string) =>
+    remoteFetch<void>(`/api/admin/users/${uid}/reset-totp`, { method: "POST" }),
   addAdminUser: (payload: Record<string, unknown>) =>
     remoteFetch<void>("/api/admin/users", {
       method: "POST",
@@ -815,6 +819,9 @@ const localAdminStubs = {
     throw new Error("本地模式暂不支持未入相册统计");
   },
   adminUsers: async (): Promise<AdminUser[]> => {
+    throw new Error("管理区需连接后台使用");
+  },
+  adminResetTotp: async () => {
     throw new Error("管理区需连接后台使用");
   },
   addAdminUser: async () => {
@@ -928,6 +935,7 @@ export interface ApiProvider {
   orphans(): Promise<BlobEntry[]>;
   // ---- 管理区（远端） ----
   adminUsers(): Promise<AdminUser[]>;
+  adminResetTotp(uid: string): Promise<void>;
   addAdminUser(payload: Record<string, unknown>): Promise<void>;
   updateAdminUser(uid: string, payload: Record<string, unknown>): Promise<void>;
   deleteAdminUser(uid: string): Promise<void>;

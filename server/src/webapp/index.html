@@ -210,6 +210,11 @@ table.admin th { color: var(--muted); font-weight: 500; }
 .status-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
 .status-card h3 { margin: 0 0 10px; font-size: 15px; }
 @media (max-width: 900px) { .status-charts { grid-template-columns: 1fr; } }
+/* 竖排表单（同步源 / 存储管理 / 设置） */
+.form-card.vcol { flex-direction: column; align-items: stretch; gap: 12px; }
+.form-card.vcol .frow { display: flex; gap: 12px; flex-wrap: wrap; }
+.form-card.vcol label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); min-width: 220px; flex: 1; }
+.form-card.vcol label.f input, .form-card.vcol label.f select { width: 100%; }
 table.admin td { word-break: break-all; }
 .modal { width: min(520px, 94vw); overflow-x: hidden; }
 html, body { height: 100%; }

@@ -143,7 +143,7 @@ function ShellInner({ onLock }: { onLock: () => void }) {
     <div className="app-shell">
       <nav className="sidebar">
         <div className="logo">牧心相册</div>
-        {navItems.map((it) => (
+        {navItems.filter((it) => it.show).map((it) => (
           <a key={it.view} className={view === it.view || (it.view === "albums" && albumId) ? "active" : ""} onClick={() => nav(it.view)}>
             <Ic name={it.icon} />
             {it.label}

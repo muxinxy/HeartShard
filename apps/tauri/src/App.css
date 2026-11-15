@@ -768,7 +768,7 @@ h1, h2, h3 { color: var(--foreground); }
    ================================================================ */
 
 /* ---------- 全局圆角（按钮/输入统一 10px） ---------- */
-button { border-radius: 10px; }
+button { border-radius: 10px; transition: border-color 0.15s, background 0.15s, color 0.15s; }
 table.admin button, .form-card button, .selbar button { border-radius: 10px; }
 
 /* ---------- 线性 SVG 图标 ---------- */
@@ -1210,6 +1210,13 @@ button.danger { color: var(--destructive); }
 .perm-select { min-width: 90px; }
 .acl-tabs { display: flex; gap: 8px; margin: 10px 0; }
 .acl-tabs button.active { background: var(--primary); color: #fff; border: none; font-weight: 600; }
+
+/* ---------- 竖排表单（同步源 / 存储管理 / 设置；与网页端一致） ---------- */
+.vform { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+.vform .frow { display: flex; gap: 12px; flex-wrap: wrap; }
+.vfield { display: flex; flex-direction: column; gap: 4px; min-width: 220px; flex: 1; }
+.vfield > span { font-size: 13px; color: var(--muted); }
+.vfield input, .vfield select { width: 100%; }
 
 /* ---------- 系统状态仪表盘 ---------- */
 .status-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }

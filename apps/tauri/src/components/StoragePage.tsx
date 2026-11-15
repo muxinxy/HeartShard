@@ -185,11 +185,11 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="wizard">
-      <header className="toolbar">
-        <span className="brand">存储管理</span>
-        <span className="spacer" />
-        <button onClick={onDone}>返回</button>
-      </header>
+      <div className="view-head">
+        <h2>存储管理</h2>
+        <span style={{ flex: 1 }} />
+        <button className="back-btn" onClick={onDone}>返回</button>
+      </div>
 
       {error && <div className="notice error">{error}</div>}
 
@@ -218,37 +218,37 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
       </div>
 
       {mode === "local" && (
-        <div className="settings-card">
+        <div className="settings-card vform">
           <p className="hint">选择一个本地目录作为 Storage（分片将存入该目录下的子路径）。</p>
           <button onClick={doPickDir} disabled={busy}>选择目录…</button>
         </div>
       )}
 
       {mode === "s3" && (
-        <div className="settings-card">
-          <label className="setting-row"><span>Endpoint</span>
+        <div className="settings-card vform">
+          <label className="vfield"><span>Endpoint</span>
             <input value={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.value)} placeholder="https://s3.amazonaws.com" /></label>
-          <label className="setting-row"><span>Bucket</span>
+          <label className="vfield"><span>Bucket</span>
             <input value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} placeholder="my-bucket" /></label>
-          <label className="setting-row"><span>Access Key</span>
+          <label className="vfield"><span>Access Key</span>
             <input value={s3Key} onChange={(e) => setS3Key(e.target.value)} /></label>
-          <label className="setting-row"><span>Secret Key</span>
+          <label className="vfield"><span>Secret Key</span>
             <input type="password" value={s3Secret} onChange={(e) => setS3Secret(e.target.value)} /></label>
-          <label className="setting-row"><span>Region</span>
+          <label className="vfield"><span>Region</span>
             <input value={s3Region} onChange={(e) => setS3Region(e.target.value)} /></label>
-          <label className="setting-row"><span>Path Style（MinIO/R2 勾选）</span>
+          <label className="vfield"><span>Path Style（MinIO/R2 勾选）</span>
             <input type="checkbox" checked={s3PathStyle} onChange={(e) => setS3PathStyle(e.target.checked)} /></label>
           <TestAddButtons addLabel="添加 S3 Storage" />
         </div>
       )}
 
       {mode === "openlist" && (
-        <div className="settings-card">
-          <label className="setting-row"><span>Base URL</span>
+        <div className="settings-card vform">
+          <label className="vfield"><span>Base URL</span>
             <input value={olUrl} onChange={(e) => setOlUrl(e.target.value)} placeholder="http://127.0.0.1:5244" /></label>
-          <label className="setting-row"><span>令牌 Token</span>
+          <label className="vfield"><span>令牌 Token</span>
             <input type="password" value={olToken} onChange={(e) => setOlToken(e.target.value)} placeholder="OpenList 管理后台「个人资料 → 令牌」生成" /></label>
-          <label className="setting-row"><span>基础路径</span>
+          <label className="vfield"><span>基础路径</span>
             <input value={olPath} onChange={(e) => setOlPath(e.target.value)} placeholder="/heartshard" /></label>
           <TestAddButtons addLabel="添加 OpenList Storage" />
           <p className="hint">使用令牌认证（与网页端一致）；不再使用用户名密码。</p>
@@ -256,12 +256,12 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
       )}
 
       {mode === "webdav" && (
-        <div className="settings-card">
-          <label className="setting-row"><span>Base URL</span>
+        <div className="settings-card vform">
+          <label className="vfield"><span>Base URL</span>
             <input value={wdUrl} onChange={(e) => setWdUrl(e.target.value)} placeholder="https://dav.example.com/dav" /></label>
-          <label className="setting-row"><span>用户名</span>
+          <label className="vfield"><span>用户名</span>
             <input value={wdUser} onChange={(e) => setWdUser(e.target.value)} /></label>
-          <label className="setting-row"><span>密码</span>
+          <label className="vfield"><span>密码</span>
             <input type="password" value={wdPass} onChange={(e) => setWdPass(e.target.value)} /></label>
           <TestAddButtons addLabel="添加 WebDAV Storage" />
           <p className="hint">兼容 nginx dav / Nextcloud / Alist / OpenList 的 WebDAV 入口（Basic 认证）。</p>
@@ -269,18 +269,18 @@ export function StoragePage({ onDone }: { onDone: () => void }) {
       )}
 
       {mode === "ftp" && (
-        <div className="settings-card">
-          <label className="setting-row"><span>主机</span>
+        <div className="settings-card vform">
+          <label className="vfield"><span>主机</span>
             <input value={ftpHost} onChange={(e) => setFtpHost(e.target.value)} placeholder="ftp.example.com" /></label>
-          <label className="setting-row"><span>端口</span>
+          <label className="vfield"><span>端口</span>
             <input value={ftpPort} onChange={(e) => setFtpPort(e.target.value)} placeholder="990" /></label>
-          <label className="setting-row"><span>用户名</span>
+          <label className="vfield"><span>用户名</span>
             <input value={ftpUser} onChange={(e) => setFtpUser(e.target.value)} /></label>
-          <label className="setting-row"><span>密码</span>
+          <label className="vfield"><span>密码</span>
             <input type="password" value={ftpPass} onChange={(e) => setFtpPass(e.target.value)} /></label>
-          <label className="setting-row"><span>FTPS（AUTH TLS）</span>
+          <label className="vfield"><span>FTPS（AUTH TLS）</span>
             <input type="checkbox" checked={ftpSecure} onChange={(e) => setFtpSecure(e.target.checked)} /></label>
-          <label className="setting-row"><span>基础路径</span>
+          <label className="vfield"><span>基础路径</span>
             <input value={ftpPath} onChange={(e) => setFtpPath(e.target.value)} placeholder="/heartshard" /></label>
           <TestAddButtons addLabel="添加 FTPS Storage" />
           <p className="hint">仅支持 FTPS；明文 FTP 因凭据明文传输默认禁用。</p>

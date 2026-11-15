@@ -273,6 +273,8 @@ pub async fn list_albums(State(state): S, headers: HeaderMap) -> Response {
             .map(|(a, p)| serde_json::json!({
                 "id": a.id, "name": a.name, "parent_id": a.parent_id,
                 "blob_count": a.blob_count,
+                "cover_hash": a.cover_hash,
+                "sort_order": a.sort_order,
                 "perm": format!("{p:?}").to_lowercase(),
             }))
             .collect::<Vec<_>>())
@@ -1243,6 +1245,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/albums/{id}/acl", get(get_acl).post(set_acl))
         .route("/api/admin/users", get(crate::admin::list_users).post(crate::admin::create_user))
         .route("/api/admin/users/{uid}", axum::routing::put(crate::admin::update_user).delete(crate::admin::delete_user))
+        .route("/api/admin/users/{uid}/reset-totp", post(crate::admin::admin_reset_totp))
         .route("/api/admin/groups", get(crate::admin::list_groups).post(crate::admin::set_groups))
         .route("/api/admin/sources", get(crate::admin::list_sources).post(crate::admin::set_sources))
         .route("/api/admin/status", get(crate::admin::status))
