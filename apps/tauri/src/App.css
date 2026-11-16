@@ -1213,7 +1213,7 @@ button.danger { color: var(--destructive); }
   cursor: pointer;
   background: var(--card);
 }
-.explore-card .cov { aspect-ratio: 1.25; background: var(--input); display: grid; place-items: center; color: var(--primary); }
+.explore-card .cov { aspect-ratio: 1.25; background: var(--input); display: grid; place-items: center; color: var(--primary); position: relative; }
 .explore-card .cov .ic { width: 34px; height: 34px; }
 .explore-card .nm { padding: 10px 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 
@@ -1223,11 +1223,12 @@ button.danger { color: var(--destructive); }
 .acl-tabs button.active { background: var(--primary); color: #fff; border: none; font-weight: 600; }
 
 /* ---------- 竖排表单（同步源 / 存储管理 / 设置；与网页端一致） ---------- */
-.vform { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+.vform { display: flex; flex-direction: column; gap: 14px; align-items: stretch; max-width: 560px; }
 .vform .frow { display: flex; gap: 12px; flex-wrap: wrap; }
 .vfield { display: flex; flex-direction: column; gap: 4px; min-width: 220px; flex: 1; }
 .vfield > span { font-size: 13px; color: var(--muted); }
 .vfield input, .vfield select { width: 100%; }
+.form-card.vcol { max-width: 560px; }
 
 /* ---------- 系统状态仪表盘 ---------- */
 .status-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }

@@ -120,11 +120,12 @@ export function AdminStorageView() {
         </tbody>
       </table>
 
-      <div className="form-card" style={{ alignItems: "flex-start", flexDirection: "column", marginTop: 20 }}>
+      <div className="form-card vcol" style={{ marginTop: 20 }}>
         <strong>
           <Ic name="i-storage" /> 添加存储
         </strong>
-        <div className="row">
+        <label className="vfield">
+          <span>类型</span>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             {Object.entries(KIND_LABEL).map(([k, v]) => (
               <option key={k} value={k}>
@@ -132,25 +133,60 @@ export function AdminStorageView() {
               </option>
             ))}
           </select>
-          <input placeholder="存储 ID" value={id} onChange={(e) => setId(e.target.value)} style={{ width: 160 }} />
-          {kind === "local" && <input placeholder="本地目录" value={root} onChange={(e) => setRoot(e.target.value)} style={{ flex: 1 }} />}
-          {kind !== "local" && <input placeholder="端点地址" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} style={{ flex: 1 }} />}
-          {kind === "s3" && <input placeholder="bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} />}
-          {kind === "s3" && <input placeholder="region（可选）" value={region} onChange={(e) => setRegion(e.target.value)} />}
-        </div>
+        </label>
+        <label className="vfield">
+          <span>存储 ID</span>
+          <input placeholder="存储 ID" value={id} onChange={(e) => setId(e.target.value)} />
+        </label>
+        {kind === "local" && (
+          <label className="vfield">
+            <span>本地目录</span>
+            <input placeholder="本地目录" value={root} onChange={(e) => setRoot(e.target.value)} />
+          </label>
+        )}
+        {kind !== "local" && (
+          <label className="vfield">
+            <span>端点地址</span>
+            <input placeholder="端点地址" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
+          </label>
+        )}
+        {kind === "s3" && (
+          <label className="vfield">
+            <span>Bucket</span>
+            <input placeholder="bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} />
+          </label>
+        )}
+        {kind === "s3" && (
+          <label className="vfield">
+            <span>Region（可选）</span>
+            <input placeholder="region（可选）" value={region} onChange={(e) => setRegion(e.target.value)} />
+          </label>
+        )}
+        {(kind === "s3" || kind === "webdav") && (
+          <label className="vfield">
+            <span>用户 / Access Key</span>
+            <input placeholder="用户 / Access Key" value={user} onChange={(e) => setUser(e.target.value)} />
+          </label>
+        )}
+        {(kind === "s3" || kind === "webdav") && (
+          <label className="vfield">
+            <span>密码 / Secret Key</span>
+            <input type="password" placeholder="密码 / Secret Key" value={pass} onChange={(e) => setPass(e.target.value)} />
+          </label>
+        )}
+        {kind === "openlist" && (
+          <label className="vfield">
+            <span>令牌 Token</span>
+            <input placeholder="令牌 token" value={token} onChange={(e) => setToken(e.target.value)} />
+          </label>
+        )}
+        {kind === "openlist" && (
+          <label className="vfield">
+            <span>base_path</span>
+            <input placeholder="base_path" value={base} onChange={(e) => setBase(e.target.value)} />
+          </label>
+        )}
         <div className="row">
-          {(kind === "s3" || kind === "webdav") && (
-            <>
-              <input placeholder="用户 / Access Key" value={user} onChange={(e) => setUser(e.target.value)} />
-              <input type="password" placeholder="密码 / Secret Key" value={pass} onChange={(e) => setPass(e.target.value)} />
-            </>
-          )}
-          {kind === "openlist" && (
-            <>
-              <input placeholder="令牌 token" value={token} onChange={(e) => setToken(e.target.value)} style={{ flex: 1 }} />
-              <input placeholder="base_path" value={base} onChange={(e) => setBase(e.target.value)} />
-            </>
-          )}
           <button className="primary" onClick={add} disabled={!id.trim()}>
             添加
           </button>

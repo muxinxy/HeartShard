@@ -79,7 +79,7 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
       {saveMsg && <div className="notice">{saveMsg}</div>}
 
       <h2>修改口令</h2>
-      <div className="settings-card">
+      <div className="settings-card vform">
         <p className="hint">
           重加密 MK 封装，不重传 shard。新口令下次解锁生效。
         </p>
@@ -98,8 +98,8 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
 
       <h2>存储参数</h2>
       {settings && (
-        <div className="settings-card">
-          <label className="setting-row">
+        <div className="settings-card vform">
+          <label className="vfield">
             <span>默认分片大小</span>
             <select
               value={settings.chunk_size}
@@ -110,14 +110,14 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
               ))}
             </select>
           </label>
-          <label className="setting-row">
+          <label className="vfield">
             <span>n（总 shard 数）</span>
             <select value={settings.n}
               onChange={(e) => update({ n: Number(e.target.value), m: Math.min(settings.m, Number(e.target.value)) })}>
               {[2, 4, 6, 8].map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </label>
-          <label className="setting-row">
+          <label className="vfield">
             <span>m（恢复阈值）</span>
             <select value={settings.m}
               onChange={(e) => update({ m: Number(e.target.value) })}>
@@ -126,7 +126,7 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
               ))}
             </select>
           </label>
-          <label className="setting-row">
+          <label className="vfield">
             <span>下载并发数</span>
             <input type="number" min={1} max={10} value={settings.download_concurrency}
               onChange={(e) => update({ download_concurrency: Math.max(1, Number(e.target.value) || 1) })} />
@@ -142,8 +142,8 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
       )}
 
       <h2>外观</h2>
-      <div className="settings-card">
-        <label className="setting-row">
+      <div className="settings-card vform">
+        <label className="vfield">
           <span>主题（也可在右上角头像菜单切换）</span>
           <select
             value={localStorage.getItem("hs_theme") || "dark"}
@@ -158,7 +158,7 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
             <option value="light">浅色</option>
           </select>
         </label>
-        <label className="setting-row">
+        <label className="vfield">
           <span>地图源（探索地点 / 地图视图）</span>
           <select
             value={localStorage.getItem("hs_map_source") || "osm"}
@@ -174,7 +174,7 @@ export function SettingsPage({ onDone }: { onDone: () => void }) {
             ))}
           </select>
         </label>
-        <label className="setting-row">
+        <label className="vfield">
           <span>高德 Web 服务 Key（逆地理编码：把地点坐标显示为城市名，可选）</span>
           <input
             value={localStorage.getItem("hs_amap_key") || ""}

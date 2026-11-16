@@ -961,32 +961,34 @@ async function viewExplore() {
   const placeList = [...places.entries()].sort((a, b) => b[1].length - a[1].length);
   const firstImg = (list) => (list.find((b) => b.mime.startsWith("image/")) || {}).blob_hash || "";
   const v = $("view");
-  const card = (dataAttr, iconId, label, cnt, cover) => {
-    // 有内容显示首张缩略图；空集合才显示图标
+  const card = (dataAttr, iconId, label, cnt, cover, motion) => {
+    // 有内容显示首张缩略图；空集合才显示图标。含动态照片时叠加角标
     const cov = cover
       ? `<img src="/api/blobs/${cover}/thumbnail?token=${encodeURIComponent(token)}" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:cover">`
       : `<svg class="ic" style="width:36px;height:36px"><use href="#i-${iconId}"/></svg>`;
+    const badge = motion ? `<span class="motion-badge" title="含动态照片"><svg class="ic"><use href="#i-motion"/></svg></span>` : "";
     return `
     <div class="album-card" ${dataAttr}>
-      <div class="cov" style="display:grid;place-items:center;overflow:hidden">${cov}</div>
+      <div class="cov" style="display:grid;place-items:center;overflow:hidden;position:relative">${cov}${badge}</div>
       <div class="nm"><span>${label}</span><span class="cnt">${cnt}</span></div>
     </div>`;
   };
+  const hasMotion = (list) => list.some((b) => b.is_motion);
   v.innerHTML = `
     <h2 style="margin:6px 0">探索</h2>
     <h3 class="day-header">类别</h3>
     <div class="album-wall" id="exp-kinds">
-      ${card('data-kind="recent"', "recent", "最近添加", recent.length, firstImg(recent))}
-      ${card('data-kind="photo"', "image", "照片", photos.length, firstImg(photos))}
-      ${card('data-kind="video"', "video", "视频", videos.length, "")}
-      ${card('data-kind="motion"', "motion", "动态照片", motions.length, firstImg(motions))}
-      ${card('data-kind="orphan"', "box", "未入相册", orphans.length, firstImg(orphans))}
+      ${card('data-kind="recent"', "recent", "最近添加", recent.length, firstImg(recent), hasMotion(recent))}
+      ${card('data-kind="photo"', "image", "照片", photos.length, firstImg(photos), false)}
+      ${card('data-kind="video"', "video", "视频", videos.length, "", false)}
+      ${card('data-kind="motion"', "motion", "动态照片", motions.length, firstImg(motions), true)}
+      ${card('data-kind="orphan"', "box", "未入相册", orphans.length, firstImg(orphans), hasMotion(orphans))}
     </div>
     <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）${placeList.length ? `<a id="places-all" class="hint" style="cursor:pointer;margin-left:10px">🗺 地图查看全部</a>` : ""}</h3>
     ${placeList.length === 0
       ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
       : `<div class="album-wall" id="exp-places">
-          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length, firstImg(items))).join("")}
+          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length, firstImg(items), hasMotion(items))).join("")}
         </div>`}`;
   v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("最近添加", recent);
   v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("照片", (b) => b.mime.startsWith("image/"));

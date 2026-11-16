@@ -92,12 +92,16 @@ export function AdminSourcesView() {
         </div>
       ))}
 
-      <div className="form-card" style={{ alignItems: "flex-start", flexDirection: "column" }}>
+      <div className="form-card vcol">
         <strong>
           <Ic name="i-sync" /> 添加同步源
         </strong>
-        <div className="row">
-          <input placeholder="源 ID（如 photos）" value={id} onChange={(e) => setId(e.target.value)} style={{ width: 180 }} />
+        <label className="vfield">
+          <span>源 ID（如 photos）</span>
+          <input placeholder="源 ID（如 photos）" value={id} onChange={(e) => setId(e.target.value)} />
+        </label>
+        <label className="vfield">
+          <span>类型</span>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             {Object.entries(KIND_LABEL).map(([k, v]) => (
               <option key={k} value={k}>
@@ -105,33 +109,64 @@ export function AdminSourcesView() {
               </option>
             ))}
           </select>
-          {kind === "local" && <input placeholder="本地目录路径" value={root} onChange={(e) => setRoot(e.target.value)} style={{ flex: 1 }} />}
-          {kind !== "local" && <input placeholder="端点地址" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} style={{ flex: 1 }} />}
-          {kind === "s3" && <input placeholder="bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} />}
-          {kind === "openlist" && <input placeholder="令牌 token" value={token} onChange={(e) => setToken(e.target.value)} style={{ flex: 1 }} />}
-          {kind === "openlist" && <input placeholder="base_path（/heartshard）" value={base} onChange={(e) => setBase(e.target.value)} />}
-        </div>
+        </label>
+        {kind === "local" && (
+          <label className="vfield">
+            <span>本地目录路径</span>
+            <input placeholder="本地目录路径" value={root} onChange={(e) => setRoot(e.target.value)} />
+          </label>
+        )}
+        {kind !== "local" && (
+          <label className="vfield">
+            <span>端点地址</span>
+            <input placeholder="端点地址" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
+          </label>
+        )}
+        {kind === "s3" && (
+          <label className="vfield">
+            <span>Bucket</span>
+            <input placeholder="bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} />
+          </label>
+        )}
+        {kind === "openlist" && (
+          <label className="vfield">
+            <span>令牌 Token</span>
+            <input placeholder="令牌 token" value={token} onChange={(e) => setToken(e.target.value)} />
+          </label>
+        )}
+        {kind === "openlist" && (
+          <label className="vfield">
+            <span>base_path（/heartshard）</span>
+            <input placeholder="base_path（/heartshard）" value={base} onChange={(e) => setBase(e.target.value)} />
+          </label>
+        )}
+        {(kind === "s3" || kind === "webdav") && (
+          <label className="vfield">
+            <span>用户 / Access Key</span>
+            <input placeholder="用户 / Access Key" value={user} onChange={(e) => setUser(e.target.value)} />
+          </label>
+        )}
+        {(kind === "s3" || kind === "webdav") && (
+          <label className="vfield">
+            <span>密码 / Secret Key</span>
+            <input type="password" placeholder="密码 / Secret Key" value={pass} onChange={(e) => setPass(e.target.value)} />
+          </label>
+        )}
+        <label className="vfield">
+          <span>策略</span>
+          <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+            <option value="append">append（仅新增）</option>
+            <option value="mirror">mirror（完全同步）</option>
+          </select>
+        </label>
+        <label className="vfield">
+          <span>删除</span>
+          <select value={delMode} onChange={(e) => setDelMode(e.target.value)}>
+            <option value="keep">保留</option>
+            <option value="trash">入回收站</option>
+          </select>
+        </label>
         <div className="row">
-          {(kind === "s3" || kind === "webdav") && (
-            <>
-              <input placeholder="用户 / Access Key" value={user} onChange={(e) => setUser(e.target.value)} />
-              <input type="password" placeholder="密码 / Secret Key" value={pass} onChange={(e) => setPass(e.target.value)} />
-            </>
-          )}
-          <label>
-            策略
-            <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-              <option value="append">append（仅新增）</option>
-              <option value="mirror">mirror（完全同步）</option>
-            </select>
-          </label>
-          <label>
-            删除
-            <select value={delMode} onChange={(e) => setDelMode(e.target.value)}>
-              <option value="keep">保留</option>
-              <option value="trash">入回收站</option>
-            </select>
-          </label>
           <button className="primary" onClick={add} disabled={!id.trim()}>
             添加
           </button>

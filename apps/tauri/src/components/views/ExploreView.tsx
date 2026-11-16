@@ -159,10 +159,31 @@ export function ExploreView() {
 }
 
 function ExploreCard({ facet, onOpen }: { facet: Facet; onOpen: () => void }) {
+  // 有内容显示首张图片缩略图；空集合才显示图标。含动态照片时叠加角标。
+  const firstImg = facet.blobs.find((b) => b.mime.startsWith("image/"));
+  const hasMotion = facet.blobs.some((b) => b.is_motion);
+  const [cover, setCover] = useState<string | null>(null);
+  useEffect(() => {
+    if (!firstImg) return;
+    let cancelled = false;
+    api.thumbnailUrl(firstImg.blob_hash).then((u) => !cancelled && setCover(u)).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [firstImg?.blob_hash]);
   return (
     <div className="explore-card" onClick={onOpen}>
-      <div className="cov">
-        <Ic name={facet.icon} />
+      <div className="cov" style={cover ? { overflow: "hidden" } : undefined}>
+        {cover ? (
+          <img src={cover} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <Ic name={facet.icon} />
+        )}
+        {hasMotion && (
+          <span className="motion-badge" style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,.55)" }}>
+            <Ic name="i-motion" />
+          </span>
+        )}
       </div>
       <div className="nm">
         <span>{facet.label}</span>
