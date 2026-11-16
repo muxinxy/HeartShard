@@ -41,16 +41,17 @@ function AlbumWall({
       .listAlbums()
       .then((list) => {
         setAlbums([...list].sort((a, b) => a.sort_order - b.sort_order));
-        // 封面：优先 cover_hash，否则取相册第一张（网页端同款）
+        // 封面：优先 cover_hash；封面照片被删除时回退第一张
         (async () => {
           const m: Record<string, string> = {};
           for (const a of list) {
-            if (a.cover_hash) {
-              m[a.id] = a.cover_hash;
-              continue;
-            }
             const first = await api.listAlbumBlobs(a.id).catch(() => []);
-            if (first.length > 0) m[a.id] = first[0].blob_hash;
+            const imgs = first.filter((b) => b.mime.startsWith("image/"));
+            if (a.cover_hash && first.some((b) => b.blob_hash === a.cover_hash)) {
+              m[a.id] = a.cover_hash;
+            } else if (imgs.length > 0) {
+              m[a.id] = imgs[0].blob_hash;
+            }
           }
           setCovers(m);
         })();

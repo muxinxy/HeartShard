@@ -510,6 +510,28 @@ fn require_blob_view(state: &AppState, user: &User, blob_hash: &str) -> Result<(
             }
         }
     }
+    // 未入相册的照片（存在于索引、不属于任何相册）对所有登录用户可见，
+    // 与 /api/blobs/orphans 的可见性保持一致——否则未入相册的缩略图/原图 403。
+    let exists = core
+        .list_blobs()
+        .map(|l| l.iter().any(|x| x.blob_hash == blob_hash))
+        .unwrap_or(false);
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "照片不存在"));
+    }
+    let in_any_album = core
+        .list_albums()
+        .map(|albums| {
+            albums.iter().any(|a| {
+                core.list_album_blobs(&a.id)
+                    .map(|bs| bs.iter().any(|b| b.blob_hash == blob_hash))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if !in_any_album {
+        return Ok(());
+    }
     Err(err(StatusCode::FORBIDDEN, "无权访问该照片"))
 }
 

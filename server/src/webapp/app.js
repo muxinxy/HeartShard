@@ -33,8 +33,10 @@ function toast(msg, isErr = false) {
 async function api(path, opts = {}) {
   const headers = opts.headers || {};
   if (token) headers["authorization"] = `Bearer ${token}`;
+  // GET 加缓存击穿参数：避免 WebView/浏览器缓存导致「上传后时间线不刷新」
+  const url = !opts.method || opts.method === "GET" ? `${path}${path.includes("?") ? "&" : "?"}_t=${Date.now()}` : path;
   console.debug("[api]", opts.method || "GET", path);
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(url, { ...opts, headers });
   if (res.status === 401) { showLogin(); throw new Error("登录已过期"); }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -362,6 +364,12 @@ if (token) {
 // ---------------- 路由 ----------------
 document.querySelectorAll(".sidebar a[data-view]").forEach((a) => {
   a.onclick = () => { location.hash = `#/${a.dataset.view}`; };
+});
+// 抽屉侧边栏（窄屏）：汉堡按钮开合；点遮罩/任一导航后收起
+$("menu-btn").onclick = () => document.body.classList.toggle("sidebar-open");
+$("sidebar-backdrop").onclick = () => document.body.classList.remove("sidebar-open");
+document.querySelectorAll(".sidebar a").forEach((a) => {
+  a.addEventListener("click", () => document.body.classList.remove("sidebar-open"));
 });
 window.addEventListener("hashchange", route);
 
@@ -700,7 +708,7 @@ function photoCell(b) {
     img.onerror = () => (cell.style.visibility = "hidden");
     cell.prepend(img);
   } else {
-    cell.insertAdjacentHTML("afterbegin", `<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:32px">🎬</div>`);
+    cell.insertAdjacentHTML("afterbegin", `<div style="position:absolute;inset:0;display:grid;place-items:center"><svg class="ic" style="width:32px;height:32px"><use href="#i-video"/></svg></div>`);
   }
   cell.querySelector(".check").onclick = (e) => {
     e.stopPropagation();
@@ -811,6 +819,8 @@ function openViewer(b) {
   }
   if (b.mime.startsWith("video/")) {
     // 视频用 <video> 在线播放（解密字节流直接喂给 video 元素）
+    // 工具条上移，避免遮挡视频自带控制条
+    $("lb-tools").style.bottom = "76px";
     lbImg.style.display = "none";
     let vid = $("lb-video");
     if (!vid) {
@@ -827,6 +837,7 @@ function openViewer(b) {
     lbImg.style.display = "block";
     const vid = $("lb-video");
     if (vid) { vid.pause?.(); vid.style.display = "none"; }
+    $("lb-tools").style.bottom = "18px";
     lbImg.src = url;
   }
   viewer.style.display = "flex";
@@ -948,11 +959,12 @@ async function viewExplore() {
   }
   const motions = all.filter((b) => b.is_motion);
   const placeList = [...places.entries()].sort((a, b) => b[1].length - a[1].length);
+  const firstImg = (list) => (list.find((b) => b.mime.startsWith("image/")) || {}).blob_hash || "";
   const v = $("view");
   const card = (dataAttr, iconId, label, cnt, cover) => {
     // 有内容显示首张缩略图；空集合才显示图标
     const cov = cover
-      ? `<img src="/api/blobs/${cover}/thumbnail?token=${encodeURIComponent(token)}" style="width:100%;height:100%;object-fit:cover">`
+      ? `<img src="/api/blobs/${cover}/thumbnail?token=${encodeURIComponent(token)}" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:cover">`
       : `<svg class="ic" style="width:36px;height:36px"><use href="#i-${iconId}"/></svg>`;
     return `
     <div class="album-card" ${dataAttr}>
@@ -964,17 +976,17 @@ async function viewExplore() {
     <h2 style="margin:6px 0">探索</h2>
     <h3 class="day-header">类别</h3>
     <div class="album-wall" id="exp-kinds">
-      ${card('data-kind="recent"', "recent", "最近添加", recent.length, recent[0]?.blob_hash)}
-      ${card('data-kind="photo"', "image", "照片", photos.length, photos[0]?.blob_hash)}
-      ${card('data-kind="video"', "video", "视频", videos.length, videos[0]?.blob_hash)}
-      ${card('data-kind="motion"', "motion", "动态照片", motions.length, motions[0]?.blob_hash)}
-      ${card('data-kind="orphan"', "box", "未入相册", orphans.length, orphans[0]?.blob_hash)}
+      ${card('data-kind="recent"', "recent", "最近添加", recent.length, firstImg(recent))}
+      ${card('data-kind="photo"', "image", "照片", photos.length, firstImg(photos))}
+      ${card('data-kind="video"', "video", "视频", videos.length, "")}
+      ${card('data-kind="motion"', "motion", "动态照片", motions.length, firstImg(motions))}
+      ${card('data-kind="orphan"', "box", "未入相册", orphans.length, firstImg(orphans))}
     </div>
     <h3 class="day-header" style="margin-top:22px">地点（GPS 聚类）${placeList.length ? `<a id="places-all" class="hint" style="cursor:pointer;margin-left:10px">🗺 地图查看全部</a>` : ""}</h3>
     ${placeList.length === 0
       ? `<p class="hint">还没有带 GPS 位置的照片。导入的照片若含 EXIF GPS 会自动归入地点。</p>`
       : `<div class="album-wall" id="exp-places">
-          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length, items[0]?.blob_hash)).join("")}
+          ${placeList.map(([k, items]) => card(`data-place="${k}"`, "explore", k, items.length, firstImg(items))).join("")}
         </div>`}`;
   v.querySelector('[data-kind="recent"]').onclick = () => openFiltered("最近添加", recent);
   v.querySelector('[data-kind="photo"]').onclick = () => openFiltered("照片", (b) => b.mime.startsWith("image/"));
@@ -1152,12 +1164,15 @@ async function viewAlbums() {
   const v = $("view");
   const covers = {};
   for (const a of albums.slice(0, 200)) {
-    // 优先显式封面（右键相册 → 修改封面设置的）；否则回退第一张
-    if (a.cover_hash) { covers[a.id] = a.cover_hash; continue; }
+    // 优先显式封面；若封面照片已被删除则回退第一张
     try {
       const list = await api(`/api/albums/${a.id}/blobs`);
       const imgs = list.filter((b) => b.mime.startsWith("image/"));
-      if (imgs.length > 0) covers[a.id] = imgs[0].blob_hash;
+      if (a.cover_hash && list.some((b) => b.blob_hash === a.cover_hash)) {
+        covers[a.id] = a.cover_hash;
+      } else if (imgs.length > 0) {
+        covers[a.id] = imgs[0].blob_hash;
+      }
     } catch {}
   }
   const list0 = albums.filter((a) => !searchQ || a.name.toLowerCase().includes(searchQ));
@@ -1534,18 +1549,20 @@ $("file-input").onchange = async () => {
   if (files.length === 0) return;
   const albumId = $("up-album") ? $("up-album").value : "";
   closeModal();
-  let ok = 0, fail = 0;
+  let ok = 0, dup = 0, fail = 0;
   for (const f of files) {
     const fd = new FormData();
     fd.append("file", f, f.name);
     if (albumId) fd.append("album_id", albumId);
     try {
       const res = await api("/api/blobs/upload", { method: "POST", body: fd });
-      res.status === "imported" ? ok++ : fail++;
+      if (res.status === "imported") ok++;
+      else if (res.status === "skipped_duplicate") dup++;
+      else fail++;
     } catch (e) { fail++; toast(f.name + "：" + e.message, true); }
   }
   $("file-input").value = "";
-  toast(`上传完成：${ok} 成功${fail ? `，${fail} 失败` : ""}`, fail > 0);
+  toast(`上传完成：新增 ${ok}${dup ? ` · 跳过重复 ${dup}` : ""}${fail ? ` · 失败 ${fail}` : ""}`, fail > 0);
   route();
 };
 
@@ -2092,46 +2109,42 @@ async function viewSettings() {
   v.innerHTML = `
     <div class="row"><h2 style="margin:6px 0"><svg class="ic"><use href="#i-settings"/></svg> 设置</h2><span style="flex:1"></span><button class="icon-btn" title="刷新" onclick="route()"><svg class="ic"><use href="#i-refresh"/></svg></button></div>
 
-    <div class="form-card" style="flex-direction:column;align-items:flex-start">
+    <div class="form-card vcol">
       <strong>外观</strong>
-      <label class="hint">主题 <select id="set-theme">
+      <label class="f">主题 <select id="set-theme">
         <option value="dark" ${theme === "dark" ? "selected" : ""}>深色</option>
         <option value="light" ${theme === "light" ? "selected" : ""}>浅色</option>
       </select></label>
-      <label class="hint">地图源（探索地点 / 地图视图） <select id="set-map">
+      <label class="f">地图源（探索地点 / 地图视图） <select id="set-map">
         ${MAP_SOURCES.map((m) => `<option value="${m.id}" ${m.id === mapSrc ? "selected" : ""}>${m.label}</option>`).join("")}
       </select></label>
-      <label class="hint" style="width:100%">高德 Web 服务 Key（地点显示为城市名，可选）
-        <input id="set-amap" value="${amapKey}" placeholder="高德开放平台申请（类型选 Web 服务）" style="width:100%">
+      <label class="f">高德 Web 服务 Key（地点显示为城市名，可选）
+        <input id="set-amap" value="${amapKey}" placeholder="高德开放平台申请（类型选 Web 服务）">
       </label>
     </div>
 
-    <div class="form-card" style="flex-direction:column;align-items:flex-start">
+    <div class="form-card vcol">
       <strong>账号</strong>
-      <div class="row">
-        <input id="set-pw-old" type="password" placeholder="当前密码">
-        <input id="set-pw-new" type="password" placeholder="新密码">
-        <input id="set-pw-new2" type="password" placeholder="确认新密码">
-        <button id="set-pw-go" class="primary">修改密码</button>
-      </div>
+      <label class="f">当前密码 <input id="set-pw-old" type="password" placeholder="当前密码"></label>
+      <label class="f">新密码 <input id="set-pw-new" type="password" placeholder="新密码"></label>
+      <label class="f">确认新密码 <input id="set-pw-new2" type="password" placeholder="确认新密码"></label>
+      <div class="row"><button id="set-pw-go" class="primary">修改密码</button></div>
     </div>
 
     ${st ? `
-    <div class="form-card" style="flex-direction:column;align-items:flex-start">
+    <div class="form-card vcol">
       <strong>存储参数（管理员；只影响新上传）</strong>
-      <div class="row">
-        <label class="hint">默认分片大小 <select id="set-chunk">
-          ${[262144, 524288, 1048576, 2097152, 4194304].map((c) => `<option value="${c}" ${st.chunk_size === c ? "selected" : ""}>${c / 1024} KiB</option>`).join("")}
-        </select></label>
-        <label class="hint">n（总 shard 数） <select id="set-n">
-          ${[2, 4, 6, 8].map((x) => `<option value="${x}" ${st.n === x ? "selected" : ""}>${x}</option>`).join("")}
-        </select></label>
-        <label class="hint">m（恢复阈值） <select id="set-m">
-          ${Array.from({ length: st.n }, (_, i) => i + 1).map((x) => `<option value="${x}" ${st.m === x ? "selected" : ""}>${x}</option>`).join("")}
-        </select></label>
-        <label class="hint">下载并发 <input id="set-conc" type="number" min="1" max="10" value="${st.download_concurrency}" style="width:70px"></label>
-        <button id="set-save" class="primary">保存</button>
-      </div>
+      <label class="f">默认分片大小 <select id="set-chunk">
+        ${[262144, 524288, 1048576, 2097152, 4194304].map((c) => `<option value="${c}" ${st.chunk_size === c ? "selected" : ""}>${c / 1024} KiB</option>`).join("")}
+      </select></label>
+      <label class="f">n（总 shard 数） <select id="set-n">
+        ${[2, 4, 6, 8].map((x) => `<option value="${x}" ${st.n === x ? "selected" : ""}>${x}</option>`).join("")}
+      </select></label>
+      <label class="f">m（恢复阈值） <select id="set-m">
+        ${Array.from({ length: st.n }, (_, i) => i + 1).map((x) => `<option value="${x}" ${st.m === x ? "selected" : ""}>${x}</option>`).join("")}
+      </select></label>
+      <label class="f">下载并发 <input id="set-conc" type="number" min="1" max="10" value="${st.download_concurrency}"></label>
+      <div class="row"><button id="set-save" class="primary">保存</button></div>
       <p class="hint">存储放大 = n/m。修改分片参数只影响新上传的 blob。</p>
       <p class="hint" id="set-msg"></p>
     </div>` : ""}

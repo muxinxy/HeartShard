@@ -787,7 +787,7 @@ table.admin button, .form-card button, .selbar button { border-radius: 10px; }
 .sidebar .ic { width: 17px; height: 17px; }
 button .ic, .selbar .ic, .ctx-menu .ic, .lb-bar .ic, .lb-tools .ic { vertical-align: -3px; margin-right: 5px; }
 
-/* ---------- 应用壳：侧边栏 + 主区 ---------- */
+/* ---------- 应用壳：侧边栏（窄屏抽屉化） + 主区 ---------- */
 .app-shell { display: flex; height: 100vh; overflow: hidden; }
 .sidebar {
   width: 200px;
@@ -799,6 +799,17 @@ button .ic, .selbar .ic, .ctx-menu .ic, .lb-bar .ic, .lb-tools .ic { vertical-al
   gap: 2px;
   overflow-y: auto;
 }
+@media (max-width: 1023px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 250;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+  .sidebar.open { transform: none; }
+}
+.shell-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 240; }
 body.theme-light .sidebar { background: #eceef1; }
 .sidebar .logo { font-weight: 700; font-size: 17px; padding: 6px 12px 18px; }
 .sidebar a, .sidebar .nav-item {

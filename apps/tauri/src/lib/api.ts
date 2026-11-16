@@ -275,7 +275,12 @@ async function remoteFetch<T>(path: string, opts: RequestInit = {}): Promise<T> 
     authorization: `Bearer ${remoteToken()}`,
     ...((opts.headers as Record<string, string>) || {}),
   };
-  const res = await fetch(`${remoteUrl()}${path}`, { ...opts, headers });
+  // GET 加缓存击穿参数：避免 WebView 缓存导致「上传后时间线不刷新」
+  const isGet = !opts.method || opts.method === "GET";
+  const url = isGet
+    ? `${remoteUrl()}${path}${path.includes("?") ? "&" : "?"}_t=${Date.now()}`
+    : `${remoteUrl()}${path}`;
+  const res = await fetch(url, { ...opts, headers });
   if (res.status === 401) {
     clearRemoteToken();
     location.reload();

@@ -184,6 +184,7 @@ export function PhotoActionsProvider({ children }: { children: ReactNode }) {
       if (platform.isRemote) {
         // 远端：读本地路径 → multipart 上传
         let ok = 0;
+        let dup = 0;
         let fail = 0;
         for (const p of paths) {
           try {
@@ -191,13 +192,15 @@ export function PhotoActionsProvider({ children }: { children: ReactNode }) {
             const name = p.split(/[\\/]/).pop() || "upload.bin";
             const file = new File([new Uint8Array(bytes)], name);
             const r = await api.uploadFiles([file], albumId ?? null);
-            if (r.some((x) => x.status === "imported")) ok++;
+            const st = r[0]?.status;
+            if (st === "imported") ok++;
+            else if (st === "skipped_duplicate") dup++;
             else fail++;
           } catch {
             fail++;
           }
         }
-        toast.success(`上传完成：${ok} 成功${fail ? `，${fail} 失败` : ""}`);
+        toast.success(`上传完成：新增 ${ok}${dup ? ` · 跳过重复 ${dup}` : ""}${fail ? ` · 失败 ${fail}` : ""}`);
         onChanged();
         return;
       }
@@ -205,7 +208,8 @@ export function PhotoActionsProvider({ children }: { children: ReactNode }) {
       try {
         const outcomes = await api.importFiles(paths);
         const okN = outcomes.filter((o) => o.status === "imported").length;
-        toast.success(`导入完成：${okN} 张加密上传`);
+        const dupN = outcomes.filter((o) => o.status === "skipped_duplicate").length;
+        toast.success(`导入完成：新增 ${okN}${dupN ? ` · 跳过重复 ${dupN}` : ""}`);
         if (albumId) {
           for (const o of outcomes) {
             if (o.status === "imported" && o.blob_hash) await api.albumAddBlob(albumId, o.blob_hash).catch(() => {});

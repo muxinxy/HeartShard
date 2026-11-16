@@ -40,6 +40,7 @@ pub async fn list_users(State(state): State<Arc<AppState>>, headers: HeaderMap) 
             .iter()
             .map(|u| serde_json::json!({
                 "id": u.uid,
+                "uid": u.uid,
                 "name": u.name,
                 "avatar": u.avatar,
                 "is_admin": u.is_admin,

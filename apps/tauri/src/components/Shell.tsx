@@ -59,6 +59,18 @@ function ShellInner({ onLock }: { onLock: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  // 抽屉侧边栏（窄屏/窗口收窄时收起，汉堡按钮唤出）
+  const [narrow, setNarrow] = useState(window.innerWidth < 1024);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => {
+      setNarrow(window.innerWidth < 1024);
+      if (window.innerWidth >= 1024) setDrawerOpen(false);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const view = hash.replace(/^#\//, "").split("?")[0];
   const albumId = view.startsWith("album-") ? view.slice("album-".length) : null;
@@ -141,7 +153,10 @@ function ShellInner({ onLock }: { onLock: () => void }) {
 
   return (
     <div className="app-shell">
-      <nav className="sidebar">
+      {narrow && drawerOpen && (
+        <div className="shell-backdrop" onClick={() => setDrawerOpen(false)} />
+      )}
+      <nav className={`sidebar${narrow && drawerOpen ? " open" : ""}`}>
         <div className="logo">牧心相册</div>
         {navItems.filter((it) => it.show).map((it) => (
           <a key={it.view} className={view === it.view || (it.view === "albums" && albumId) ? "active" : ""} onClick={() => nav(it.view)}>
@@ -187,6 +202,11 @@ function ShellInner({ onLock }: { onLock: () => void }) {
             />
           )}
           <span style={{ flex: 1 }} />
+          {narrow && (
+            <button title="菜单" onClick={() => setDrawerOpen(!drawerOpen)}>
+              <Ic name="i-menu" />
+            </button>
+          )}
           <button title="刷新当前页" onClick={() => actions.onChanged()}>
             <Ic name="i-refresh" />
           </button>
@@ -254,7 +274,8 @@ function ShellInner({ onLock }: { onLock: () => void }) {
             if (albumId) {
               api.uploadFiles(files, albumId).then((rs) => {
                 const ok = rs.filter((r) => r.status === "imported").length;
-                toast.success(`上传完成：${ok} 成功${rs.length - ok ? `，${rs.length - ok} 失败` : ""}`);
+                const dup = rs.filter((r) => r.status === "skipped_duplicate").length;
+                toast.success(`上传完成：新增 ${ok}${dup ? ` · 跳过重复 ${dup}` : ""}${rs.length - ok - dup ? ` · 失败 ${rs.length - ok - dup}` : ""}`);
                 actions.onChanged();
               });
             } else {
@@ -520,18 +541,21 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   const submit = async () => {
     setBusy(true);
     let ok = 0;
+    let dup = 0;
     let fail = 0;
     for (const f of pending) {
       try {
         const r = await api.uploadFiles([f], albumId || null);
-        if (r.some((x) => x.status === "imported")) ok++;
+        const st = r[0]?.status;
+        if (st === "imported") ok++;
+        else if (st === "skipped_duplicate") dup++;
         else fail++;
       } catch {
         fail++;
       }
     }
     (window as unknown as { __pendingUpload?: File[] }).__pendingUpload = undefined;
-    toast.success(`上传完成：${ok} 成功${fail ? `，${fail} 失败` : ""}`);
+    toast.success(`上传完成：新增 ${ok}${dup ? ` · 跳过重复 ${dup}` : ""}${fail ? ` · 失败 ${fail}` : ""}`);
     onDone();
   };
 

@@ -125,9 +125,11 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
               autoRequest={false}
               onVerify={(data) =>
                 new Promise<void>((resolve, reject) => {
-                  // 人机判定：拖动距离 ≥ 轨道 85% 且持续 ≥ 300ms，否则弹回重试
+                  // 人机判定：data.x 是滑块按钮的位移（≈轨道宽 − 按钮宽），
+                  // 达到可用行程 85% 且持续 ≥ 300ms 才算拖满，否则弹回重试
                   const w = captchaRef.current?.clientWidth ?? 0;
-                  if (w > 0 && data.x >= w * 0.85 && data.duration >= 300) {
+                  const travel = Math.max(w - 60, 1);
+                  if (w > 0 && data.x >= travel * 0.85 && data.duration >= 200) {
                     setSliderDone(true);
                     resolve();
                   } else {

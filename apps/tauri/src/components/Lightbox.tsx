@@ -167,7 +167,8 @@ export function Lightbox({
 
         {blob.is_motion && blob.motion_video_hash && (
           <button className="lb-motion-play" onClick={() => setPlayingMotion(true)}>
-            ▶ 播放动态
+            <svg className="ic" style={{ width: 12, height: 12, marginRight: 4 }}><use href="#i-play" /></svg>
+            播放动态
           </button>
         )}
         {playingMotion && blob.motion_video_hash && (
@@ -179,7 +180,12 @@ export function Lightbox({
           </div>
         )}
 
-        <div className="lb-tools" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="lb-tools"
+          onClick={(e) => e.stopPropagation()}
+          // 视频自带控制条在底部：工具条上移避开（图片保持贴底）
+          style={blob.mime.startsWith("video/") ? { bottom: 76 } : undefined}
+        >
           <button onClick={() => setZoom((z) => Math.min(8, z * 1.25))} title="放大">＋</button>
           <button onClick={() => setZoom((z) => Math.max(0.2, z / 1.25))} title="缩小">－</button>
           <button onClick={() => setRotate((r) => r + 90)} title="旋转">⟳</button>

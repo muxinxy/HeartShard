@@ -227,7 +227,8 @@ export function TimelineView({ searchQ }: { searchQ: string }) {
           .importFiles(media)
           .then((rs) => {
             const ok = rs.filter((r) => r.status === "imported").length;
-            toast.success(`导入完成：${ok} 张加密上传`);
+            const dup = rs.filter((r) => r.status === "skipped_duplicate").length;
+            toast.success(`导入完成：新增 ${ok}${dup ? ` · 跳过重复 ${dup}` : ""}`);
             actions.onChanged();
           })
           .catch((e) => toast.error(`导入失败：${String(e)}`));
