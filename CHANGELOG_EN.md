@@ -3,6 +3,25 @@
 All notable changes to HeartShard are documented here.
 中文版见 [CHANGELOG.md](CHANGELOG.md).
 
+## [0.2.1] - 2026-11-17
+
+Mobile and experience fixes.
+
+### Fixed
+
+- The topbar avatar now updates immediately after changing the avatar (CSS
+  url() quoting bug made the background assignment a no-op)
+- Mobile topbar: search wraps to its own row; avatar / upload / refresh no
+  longer pushed off screen; the upload button no longer stacks vertically
+- Shares / trash tables scroll horizontally on narrow screens; the share
+  content dialog drops the "metadata stripped" column and keeps date/preview
+  on one line
+- Lightbox top bar buttons scroll horizontally and are all reachable on
+  mobile
+- Desktop video thumbnails: the grid and trash render a real first-frame
+  thumbnail via a `<video>` element (no more placeholder icons)
+- The web client shows first-frame video thumbnails as well
+
 ## [0.2.0] - 2026-11-17
 
 Full desktop client redesign: information architecture, visuals and features
@@ -146,5 +165,6 @@ server and the cloud storage.
 - iOS requires macOS/Xcode; HarmonyOS shell requires DevEco (see
   docs/development.md, Chinese)
 
+[0.2.1]: https://github.com/muxinxy/HeartShard/releases/tag/v0.2.1
 [0.2.0]: https://github.com/muxinxy/HeartShard/releases/tag/v0.2.0
 [0.1.0]: https://github.com/muxinxy/HeartShard/releases/tag/v0.1.0

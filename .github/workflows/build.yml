@@ -163,7 +163,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item target/release/heartshard-server.exe dist/
-          Copy-Item target/release/heartshard-tauri.exe dist/HeartShard-0.2.0-x64-portable.exe
+          Copy-Item target/release/heartshard-tauri.exe dist/HeartShard-0.2.1-x64-portable.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows

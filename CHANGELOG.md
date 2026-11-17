@@ -3,6 +3,19 @@
 HeartShard（牧心相册）的所有重要变更记录于此。
 英文版见 [CHANGELOG_EN.md](CHANGELOG_EN.md)。
 
+## [0.2.1] - 2026-11-17
+
+移动端与体验修复批次。
+
+### 修复
+
+- 修改头像后右上角头像即时更新（CSS url() 引号缺失导致背景设置失效）
+- 移动端顶栏：搜索整行换行、头像/上传/刷新不再被挤出页面、上传按钮不再竖排
+- 分享 / 回收站表格窄屏横向滑动；分享清单弹窗去掉「已去元数据」列、日期与预览同行
+- 灯箱顶栏按钮窄屏横向滑动，全部可达
+- 桌面端视频缩略图：网格/回收站用 `<video>` 预载首帧显示真实缩略图（不再占位图标）
+- 网页端视频同样显示首帧缩略图
+
 ## [0.2.0] - 2026-11-17
 
 桌面客户端全面重构：信息架构、视觉与功能与网页端完全对齐；服务端补齐
@@ -114,5 +127,6 @@ S3 / WebDAV / OpenList / FTPS 存储上——服务器（可选）与云存储�
 - 视频分享暂不去元数据；`/raw` 视频整段载入内存
 - iOS 需 macOS/Xcode；鸿蒙壳需 DevEco（详见 docs/development.md）
 
+[0.2.1]: https://github.com/muxinxy/HeartShard/releases/tag/v0.2.1
 [0.2.0]: https://github.com/muxinxy/HeartShard/releases/tag/v0.2.0
 [0.1.0]: https://github.com/muxinxy/HeartShard/releases/tag/v0.1.0

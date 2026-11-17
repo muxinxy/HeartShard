@@ -224,6 +224,27 @@ table.admin th { color: var(--muted); font-weight: 500; }
   body.sidebar-open .sidebar { transform: none; }
   body.sidebar-open #sidebar-backdrop { display: block; }
 }
+/* 移动端顶栏：搜索整行换行，头像/按钮不再被挤出；上传按钮不竖排 */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .topbar .grow { display: none; }
+  #search { order: 10; flex: 1 1 100%; max-width: none; }
+  #menu-btn { order: 0; }
+  #refresh-btn { order: 1; }
+  #upload-btn { order: 2; white-space: nowrap; }
+  .avatar-wrap { order: 3; flex-shrink: 0; }
+}
+/* 表格横向滚动（移动端分享/回收站） */
+.table-scroll { overflow-x: auto; }
+.table-scroll table.admin { min-width: 640px; }
+/* 灯箱顶栏按钮：窄屏横向滑动，全部可达 */
+@media (max-width: 640px) {
+  #lb-bar { overflow-x: auto; flex-wrap: nowrap; }
+  #lb-bar button { white-space: nowrap; flex-shrink: 0; }
+}
+/* 视频首帧缩略图 */
+.cell video.cell-video, .cell-video { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.cell .check, .cell .motion-badge, .cell .name { z-index: 2; }
 table.admin td { word-break: break-all; }
 .modal { width: min(520px, 94vw); overflow-x: hidden; }
 html, body { height: 100%; }
@@ -306,10 +327,10 @@ html, body { height: 100%; }
     <div class="topbar">
       <button id="menu-btn" class="icon-btn" title="菜单"><svg class="ic"><use href="#i-menu"/></svg></button>
       <input type="search" id="search" placeholder="搜索照片 / 相册…">
-      <span style="flex:1"></span>
+      <span class="grow" style="flex:1"></span>
       <button id="refresh-btn" title="刷新当前页" style="display:none"><svg class="ic"><use href="#i-refresh"/></svg></button>
       <button class="primary" id="upload-btn" style="display:none"><svg class="ic"><use href="#i-upload"/></svg>上传</button>
-      <div style="position:relative">
+      <div class="avatar-wrap" style="position:relative">
         <div class="avatar" id="avatar">我</div>
         <div id="avatar-menu" style="display:none;position:absolute;right:0;top:44px;width:230px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 34px rgba(0,0,0,.4);padding:10px;z-index:150;text-align:center">
           <div style="position:relative;display:inline-block;margin-top:6px">

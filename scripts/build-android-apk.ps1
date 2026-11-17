@@ -7,7 +7,7 @@
 # 用法（pwsh，工具链走 mise）：
 #   .\scripts\build-android-apk.ps1            # 完整构建（cargo + gradle）
 #   .\scripts\build-android-apk.ps1 -SkipRust  # 仅重打包（前端改动后）
-# 产物：dist\HeartShard-0.2.0-arm64.apk
+# 产物：dist\HeartShard-0.2.1-arm64.apk
 param(
     [switch]$SkipRust
 )
@@ -76,6 +76,6 @@ if (-not $hasIndex) { throw "APK 内没有前端资产（assets/index.html 缺�
 
 $dist = Join-Path $repoRoot "dist"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
-Copy-Item $apkOut (Join-Path $dist "HeartShard-0.2.0-arm64.apk") -Force
-$hash = (Get-FileHash (Join-Path $dist "HeartShard-0.2.0-arm64.apk") -Algorithm SHA256).Hash.Substring(0, 12)
-Write-Output "OK dist\HeartShard-0.2.0-arm64.apk sha256:$hash"
+Copy-Item $apkOut (Join-Path $dist "HeartShard-0.2.1-arm64.apk") -Force
+$hash = (Get-FileHash (Join-Path $dist "HeartShard-0.2.1-arm64.apk") -Algorithm SHA256).Hash.Substring(0, 12)
+Write-Output "OK dist\HeartShard-0.2.1-arm64.apk sha256:$hash"

@@ -123,7 +123,8 @@ function showMain() {
 function setAvatarUi(el, u) {
   if (u && u.avatar) {
     el.textContent = "";
-    el.style.background = `center/cover url(${u.avatar})`;
+    // data URL 含分号，url() 必须加引号（否则头像更新后右上角不生效）
+    el.style.background = `center/cover url("${u.avatar}")`;
   } else {
     el.textContent = (u && u.name ? u.name : "我").slice(0, 1);
     el.style.background = "var(--primary)";
@@ -707,8 +708,17 @@ function photoCell(b) {
     img.src = `/api/blobs/${b.blob_hash}/thumbnail?token=${encodeURIComponent(token)}`;
     img.onerror = () => (cell.style.visibility = "hidden");
     cell.prepend(img);
+  } else if (b.mime.startsWith("video/")) {
+    // 视频用 <video> 元素预载首帧（#t=0.1）作为缩略图
+    const vid = document.createElement("video");
+    vid.className = "cell-video";
+    vid.muted = true;
+    vid.preload = "metadata";
+    vid.playsInline = true;
+    vid.src = `/api/blobs/${b.blob_hash}/raw?token=${encodeURIComponent(token)}#t=0.1`;
+    cell.prepend(vid);
   } else {
-    cell.insertAdjacentHTML("afterbegin", `<div style="position:absolute;inset:0;display:grid;place-items:center"><svg class="ic" style="width:32px;height:32px"><use href="#i-video"/></svg></div>`);
+    cell.insertAdjacentHTML("afterbegin", `<div style="position:absolute;inset:0;display:grid;place-items:center"><svg class="ic" style="width:32px;height:32px"><use href="#i-image"/></svg></div>`);
   }
   cell.querySelector(".check").onclick = (e) => {
     e.stopPropagation();
@@ -1401,7 +1411,7 @@ async function viewShares() {
       <button id="sh-copy" style="display:none">复制选中链接</button>
       <button class="danger" id="sh-del" style="display:none">取消分享选中</button></div>
     ${shares.length === 0 ? `<p class="hint">还没有分享。在照片（勾选圆圈多选）或相册页创建。</p>` : `
-    <table class="admin"><tr>
+    <div class="table-scroll"><table class="admin"><tr>
         <th><input type="checkbox" id="sh-all" title="全选/取消全选本页"></th>
         <th>名称</th><th>类型</th><th>数量</th><th>分享码</th><th>过期</th><th>状态</th><th>内容</th><th></th></tr>
       ${slice.map((s) => `
@@ -1413,11 +1423,11 @@ async function viewShares() {
         <td>${s.expires_at ? new Date(s.expires_at * 1000).toLocaleString() : "永久"}</td>
         <td>${s.expired ? '<span class="badge" style="color:var(--danger)">已失效</span>' : '<span class="badge" style="color:var(--success)">有效</span>'}</td>
         <td><button onclick="showShareList('${s.id}')">查看内容</button></td>
-        <td class="row">
+        <td class="row" style="white-space:nowrap">
           <button onclick="copyShare('${s.id}', this)">复制链接</button>
           ${s.expired ? "" : `<button class="danger" onclick="cancelShare('${s.id}')">取消分享</button>`}
         </td></tr>`).join("")}
-    </table>
+    </table></div>
     ${pages > 1 ? `<div class="row" style="justify-content:center;margin-top:12px">
       <button ${sharePage === 0 ? "disabled" : ""} id="sh-prev">‹ 上一页</button>
       <span class="hint" style="align-self:center">${sharePage + 1} / ${pages}</span>
@@ -1491,7 +1501,6 @@ window.showShareList = async (id) => {
       <table class="admin">${(meta.files || []).map((f) => `
         <tr><td>${f.name}</td>
         <td style="white-space:nowrap">${new Date((f.taken_at || 0) * 1000).toLocaleDateString()}</td>
-        <td style="white-space:nowrap"><span class="badge">${f.sanitized ? "已去元数据" : "含元数据"}</span></td>
         <td style="white-space:nowrap">${f.mime.startsWith("image/") || f.mime.startsWith("video/") ? `<button onclick='previewShared(${JSON.stringify(JSON.stringify(f))})'>预览</button>` : ""}</td></tr>`).join("")}</table>
       <div class="row" style="justify-content:flex-end;margin-top:16px"><button onclick="closeModal()">关闭</button></div>`);
   } catch (e) { toast(e.message || "加载失败", true); }
@@ -1511,16 +1520,16 @@ async function viewTrash() {
   $("view").innerHTML = `
     <h2 style="margin:6px 0">回收站</h2>
     ${list.length === 0 ? `<p class="hint">回收站是空的。</p>` : `
-    <table class="admin"><tr><th></th><th>名称</th><th>大小</th><th>拍摄时间</th><th></th></tr>
+    <div class="table-scroll"><table class="admin"><tr><th></th><th>名称</th><th>大小</th><th>拍摄时间</th><th></th></tr>
       ${list.map((b) => `
-        <tr><td>${b.mime.startsWith("image/") ? `<img src="/api/blobs/${b.blob_hash}/thumbnail?token=${encodeURIComponent(token)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px" onclick="openViewer({blob_hash:'${b.blob_hash}',mime:'${b.mime}',file_name:'${b.file_name}',favorite:false,total_len:${b.total_len},taken_at:${b.taken_at || 0},gps_lat:null,gps_lon:null})" style="cursor:pointer">` : "🎬"}</td>
+        <tr><td>${b.mime.startsWith("image/") ? `<img src="/api/blobs/${b.blob_hash}/thumbnail?token=${encodeURIComponent(token)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px" onclick="openViewer({blob_hash:'${b.blob_hash}',mime:'${b.mime}',file_name:'${b.file_name}',favorite:false,total_len:${b.total_len},taken_at:${b.taken_at || 0},gps_lat:null,gps_lon:null})" style="cursor:pointer">` : `<svg class="ic" style="width:20px;height:20px"><use href="#i-video"/></svg>`}</td>
         <td>${b.file_name}</td><td>${(b.total_len / 1048576).toFixed(1)} MB</td>
         <td>${b.taken_at ? new Date(b.taken_at * 1000).toLocaleString() : "—"}</td>
         <td class="row">
           <button onclick="restoreBlob('${b.blob_hash}')">恢复</button>
           <button class="danger" onclick="purgeBlob('${b.blob_hash}','${b.file_name}')">彻底删除</button>
         </td></tr>`).join("")}
-    </table>`}`;
+    </table></div>`}`;
 }
 window.restoreBlob = async (h) => { await api(`/api/blobs/${h}/restore`, { method: "POST" }); toast("已恢复"); route(); };
 window.purgeBlob = (h, n) => {
