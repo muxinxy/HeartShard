@@ -1,6 +1,6 @@
 [package]
 name = "heartshard-syncer"
-version = "0.1.0"
+version = "0.2.0"
 description = "HeartShard 相册同步工具：本地/云存储照片源 → 相册库（策略矩阵：append/mirror），目录树映射相册。"
 authors = ["HeartShard contributors"]
 edition = "2024"

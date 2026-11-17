@@ -1,7 +1,70 @@
 # Changelog
 
 All notable changes to HeartShard are documented here.
-中文版见 [CHANGELOG.md](CHANGELOG.md)。
+中文版见 [CHANGELOG.md](CHANGELOG.md).
+
+## [0.2.0] - 2026-11-17
+
+Full desktop client redesign: information architecture, visuals and features
+now match the web client; server-side management APIs and hardening; official
+multi-arch Docker images and map-based place exploration.
+
+### Added
+
+**Desktop client (redesigned to match the web client)**
+- Sidebar information architecture: timeline / explore / albums / shares /
+  favorites / trash + admin (users / groups / sources / storage / status),
+  with hash routing for deep links
+- Explore: category entries + GPS place clustering; clicking a place opens a
+  map with stacked thumbnails and drill-down
+- Albums: cover wall + sorting + right-click rename / set cover (pick a photo
+  instead of pasting a hash) + ACL editor
+- Shares and admin area (server mode); related entries hidden automatically
+  in local mode
+- Topbar search, upload/import button, avatar menu (avatar / password / 2FA /
+  theme / lock)
+- Drawer sidebar: collapses on narrow screens with a hamburger button
+  (mobile / narrow window support)
+- A per-page refresh button; forms are stacked with a max width
+- Login slider captcha (rc-slider-captcha) + TOTP 2FA
+- All emoji replaced with the minimal line SVG icons shared with the web
+
+**Server**
+- Login rate limiting: 5 consecutive failures per IP locks it for 10 minutes
+- 2FA is now "enabled after confirmation": setup no longer persists the
+  secret; added `POST /api/me/totp/enable` with server-side verification;
+  QR code in the bind dialog; admins can reset any member's 2FA
+  (`POST /api/admin/users/{uid}/reset-totp`)
+- The user list no longer leaks password hashes / TOTP secrets; only status
+  flags are exposed
+- Album management API: rename / set cover (manage permission)
+- System settings API: `GET/POST /api/admin/settings` (chunk size / n / m /
+  download concurrency)
+- Storage probe: `POST /api/admin/storage/probe` to test connectivity before
+  adding
+- CORS enabled for cross-origin clients (desktop webview)
+- Unfiled photos are visible to logged-in users (fixes thumbnail/raw 403)
+
+**Deployment**
+- Multi-arch Docker image: `ghcr.io/muxinxy/heartshard-server`
+  (amd64 / arm64 / armv7; tag builds publish both the version and latest)
+
+### Fixed
+
+- Desktop "connect to server" routed to local unlock (dynamic Proxy dispatch)
+- Dual-mode capability flags are now read live (share/2FA entries no longer
+  leak into local mode)
+- Duplicate uploads count as "skipped" instead of failing
+- Timeline not refreshing after upload/import (GET cache busting)
+- Album covers fall back to the first photo when the cover photo is deleted
+- Unfiled photos thumbnail/raw 404 (visibility and video placeholders)
+- Lightbox toolbar no longer covers video controls
+- Web slider position math and styling; desktop verification now checks the
+  slider travel
+
+### Changed
+- Forms are stacked with a max width; button radius unified at 10px
+- System status is now a chart dashboard (bar + media composition donut)
 
 ## [0.1.0] - 2026-11-13
 
@@ -83,4 +146,5 @@ server and the cloud storage.
 - iOS requires macOS/Xcode; HarmonyOS shell requires DevEco (see
   docs/development.md, Chinese)
 
+[0.2.0]: https://github.com/muxinxy/HeartShard/releases/tag/v0.2.0
 [0.1.0]: https://github.com/muxinxy/HeartShard/releases/tag/v0.1.0

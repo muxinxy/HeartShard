@@ -1,6 +1,6 @@
 [package]
 name = "heartshard-tauri"
-version = "0.1.0"
+version = "0.2.0"
 description = "HeartShard desktop shell (Windows first; Android/iOS later)"
 authors = ["HeartShard contributors"]
 edition = "2024"
