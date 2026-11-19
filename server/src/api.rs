@@ -377,6 +377,21 @@ pub async fn list_blobs(State(state): S, headers: HeaderMap) -> Response {
             }
         }
     }
+    // 未入相册的照片（不属于任何相册）也对登录用户可见（与 orphans/内容端点一致），
+    // 否则新上传会「只出现在未入相册、时间线看不到」
+    let in_album: HashSet<String> = core
+        .list_albums()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|a| core.list_album_blobs(&a.id).ok())
+        .flatten()
+        .map(|b| b.blob_hash)
+        .collect();
+    for b in core.list_blobs().unwrap_or_default() {
+        if !in_album.contains(&b.blob_hash) && seen.insert(b.blob_hash.clone()) {
+            out.push(b);
+        }
+    }
     out.sort_by_key(|b| std::cmp::Reverse(b.taken_at));
     Json(out).into_response()
 }
@@ -420,7 +435,17 @@ pub async fn upload(
     let mut wrote_any = false;
     let mut staged: Option<std::path::PathBuf> = None;
     let mut staged_out: Option<std::fs::File> = None;
+    // 客户端附带的原拍摄时间（毫秒）：无 EXIF 的媒体用 mtime 记拍摄时间，
+    // 临时文件的 mtime 本是上传时刻 → 用客户端原值还原
+    let mut last_modified_ms: Option<i64> = None;
     while let Ok(Some(field)) = multipart.next_field().await {
+        match field.name().unwrap_or("") {
+            "last_modified" => {
+                last_modified_ms = field.text().await.ok().and_then(|s| s.trim().parse().ok());
+                continue;
+            }
+            _ => {}
+        }
         if let Some(name) = field.file_name() {
             file_name = name.to_string();
         }
@@ -459,6 +484,12 @@ pub async fn upload(
     }
     let tmp = staged.unwrap();
     drop(staged_out);
+    if let Some(ms) = last_modified_ms {
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms.max(0) as u64);
+        if let Ok(f) = std::fs::File::options().write(true).open(&tmp) {
+            let _ = f.set_times(std::fs::FileTimes::new().set_modified(t));
+        }
+    }
     eprintln!(
         "[upload] file={file_name} album_id={album_id:?} bytes={}",
         tmp.metadata().map(|m| m.len()).unwrap_or(0)
@@ -712,6 +743,9 @@ pub async fn upload_no_album(
     let mut wrote_any = false;
     let mut staged: Option<std::path::PathBuf> = None;
     let mut staged_out: Option<std::fs::File> = None;
+    // 客户端随文件附带的原拍摄时间（毫秒）——无 EXIF 的媒体用它当 mtime，
+    // 否则临时文件的 mtime = 上传时刻，会被记成「拍摄时间」
+    let mut last_modified_ms: Option<i64> = None;
     let tmp_dir = std::env::temp_dir().join("heartshard-server-upload");
     let upload_dir = tmp_dir.join(format!(
         "{}-{}",
@@ -727,6 +761,10 @@ pub async fn upload_no_album(
             "album_id" => {
                 album_id = field.text().await.ok().filter(|s| !s.is_empty());
                 continue; // album_id 可能排在文件字段之后，不能提前退出循环
+            }
+            "last_modified" => {
+                last_modified_ms = field.text().await.ok().and_then(|s| s.trim().parse().ok());
+                continue;
             }
             "file" => {}
             _ => continue,
@@ -1246,6 +1284,7 @@ pub fn router() -> axum::Router<Arc<AppState>> {
         .route("/api/albums/{id}/share", post(crate::share::create_album_share))
         .route("/api/shares", get(crate::share::list_shares).post(crate::share::create_blobs_share))
         .route("/api/shares/{id}", axum::routing::delete(crate::share::delete_share))
+        .route("/api/shares/{id}/extend", post(crate::share::share_extend))
         .route("/api/blobs", get(list_blobs))
         .route("/api/blobs/{hash}/thumbnail", get(thumbnail))
         .route("/api/blobs/{hash}/raw", get(raw))

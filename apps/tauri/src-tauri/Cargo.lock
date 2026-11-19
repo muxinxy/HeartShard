@@ -692,7 +692,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crypto"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -1638,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "heartshard-tauri"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crypto",
  "getrandom 0.2.17",
@@ -1932,7 +1932,7 @@ dependencies = [
 
 [[package]]
 name = "ida"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "reed-solomon-simd",
  "thiserror 2.0.21",
@@ -1982,7 +1982,7 @@ dependencies = [
 
 [[package]]
 name = "index"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crypto",
  "hex",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "keypath"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -3800,7 +3800,7 @@ dependencies = [
 
 [[package]]
 name = "shard"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crypto",
  "ida",

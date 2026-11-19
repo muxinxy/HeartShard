@@ -3,6 +3,31 @@
 All notable changes to HeartShard are documented here.
 中文版见 [CHANGELOG.md](CHANGELOG.md).
 
+## [0.2.2] - 2026-11-19
+
+Mobile experience, Android launch fix and share extension.
+
+### Added
+
+- Share extension: an "extend" action in the shares list (1/7/30/365 days,
+  counted from now or the existing expiry, whichever is later) +
+  `POST /api/shares/{id}/extend`
+- The avatar in the avatar menu now has an edit (pencil) badge in the
+  bottom-right corner, indicating it can be changed (both clients)
+- Uploads carry the original capture time: photos/videos without EXIF now
+  record the device's original time instead of the upload moment (both
+  clients + server-side `last_modified` field)
+
+### Fixed
+
+- Android APK crashed on launch: the data dir now uses the app-private
+  directory on Android (the portable exe-adjacent dir is read-only there and
+  panicked at startup)
+- The mobile "me" popover overflowed the left edge of the screen: it is now
+  fixed and full-width on narrow screens
+- Unfiled photos were missing from the timeline: `/api/blobs` now includes
+  them (consistent with the orphans/content endpoints)
+
 ## [0.2.1] - 2026-11-17
 
 Mobile and experience fixes.

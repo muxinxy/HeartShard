@@ -1425,6 +1425,7 @@ async function viewShares() {
         <td><button onclick="showShareList('${s.id}')">查看内容</button></td>
         <td class="row" style="white-space:nowrap">
           <button onclick="copyShare('${s.id}', this)">复制链接</button>
+          <button onclick="shareExtend('${s.id}', '${s.album_name || s.id}')">延期</button>
           ${s.expired ? "" : `<button class="danger" onclick="cancelShare('${s.id}')">取消分享</button>`}
         </td></tr>`).join("")}
     </table></div>
@@ -1488,6 +1489,28 @@ window.cancelShare = (id) => {
     await api(`/api/shares/${id}`, { method: "DELETE" });
     route();
   }, true);
+};
+window.shareExtend = (id, name) => {
+  modal(`<h3>延期分享${name ? "：" + name : ""}</h3>
+    <p class="hint">从当前时刻（或现有过期时间，取较晚者）延长有效期：</p>
+    <select id="ext-days" style="width:100%;margin:8px 0">
+      <option value="1">1 天</option>
+      <option value="7" selected>7 天</option>
+      <option value="30">30 天</option>
+      <option value="365">365 天</option>
+    </select>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button onclick="closeModal()">取消</button>
+      <button class="primary" id="ext-go">延期</button>
+    </div>`);
+  $("ext-go").onclick = async () => {
+    try {
+      await api(`/api/shares/${id}/extend`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ days: Number($("ext-days").value) }) });
+      closeModal();
+      toast("已延期");
+      route();
+    } catch (e) { toast(e.message, true); }
+  };
 };
 window.showShareList = async (id) => {
   try {
@@ -1565,6 +1588,7 @@ $("file-input").onchange = async () => {
     const fd = new FormData();
     fd.append("file", f, f.name);
     if (albumId) fd.append("album_id", albumId);
+    fd.append("last_modified", String(f.lastModified || 0));
     try {
       const res = await api("/api/blobs/upload", { method: "POST", body: fd });
       if (res.status === "imported") ok++;

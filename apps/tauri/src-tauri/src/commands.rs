@@ -561,13 +561,29 @@ pub fn read_local_file(path: String) -> Result<Vec<u8>, String> {
     fs::read(&path).map_err(|e| format!("读取失败: {e}"))
 }
 
-/// 构造数据目录：便携模式 → exe 同目录 data/（无 app_data_dir 依赖）。
-pub fn resolve_data_dir(_app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("无法定位程序路径: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or("无法确定程序所在目录")?
-        .join("data");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建数据目录: {e}"))?;
-    Ok(dir)
+/// 构造数据目录：
+/// - Android：应用私有目录（exe 同目录只读，便携逻辑会启动即 panic = 闪退）
+/// - 桌面：便携模式 → exe 同目录 data/
+pub fn resolve_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("无法确定数据目录: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建数据目录: {e}"))?;
+        return Ok(dir.join("data"));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        let exe = std::env::current_exe().map_err(|e| format!("无法定位程序路径: {e}"))?;
+        let dir = exe
+            .parent()
+            .ok_or("无法确定程序所在目录")?
+            .join("data");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建数据目录: {e}"))?;
+        Ok(dir)
+    }
 }

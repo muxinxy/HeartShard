@@ -9,7 +9,7 @@ use crate::acl::Perm;
 use crate::AppState;
 use axum::{
     extract::{Path as AxumPathT, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     Json,
 };
@@ -81,6 +81,10 @@ impl ShareStore {
         self.meta.save_share(&share)
     }
 
+    pub fn save(&self, share: &Share) -> Result<(), String> {
+        self.meta.save_share(share)
+    }
+
     pub fn remove(&self, id: &str) -> Result<(), String> {
         self.meta.delete_share(id)
     }
@@ -91,6 +95,39 @@ fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[derive(serde::Deserialize)]
+pub struct ExtendReq {
+    /// 延长天数（从 max(当前时刻, 现有过期时间) 起算）
+    pub days: i64,
+}
+
+/// POST /api/shares/{id}/extend —— 延长分享有效期。
+pub async fn share_extend(
+    State(state): State<Arc<AppState>>,
+    AxumPathT(id): AxumPathT<String>,
+    headers: HeaderMap,
+    Json(req): Json<ExtendReq>,
+) -> Response {
+    let user = match auth(&state, &headers) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
+    if req.days <= 0 || req.days > 3650 {
+        return err(StatusCode::BAD_REQUEST, "延期天数无效");
+    }
+    let mut share = match state.shares.get(&id) {
+        Some(s) => s,
+        None => return err(StatusCode::NOT_FOUND, "分享不存在"),
+    };
+    let base = share.expires_at.unwrap_or(0).max(now());
+    share.expires_at = Some(base + (req.days as u64) * 86400);
+    let _ = &user;
+    match state.shares.save(&share) {
+        Ok(()) => Json(serde_json::json!({ "expires_at": share.expires_at })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, e),
+    }
 }
 
 fn check_expired(share: &Share) -> Result<(), Response> {

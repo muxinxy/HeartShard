@@ -639,6 +639,7 @@ const remoteApi = {
       const fd = new FormData();
       fd.append("file", f, f.name);
       if (albumId) fd.append("album_id", albumId);
+      fd.append("last_modified", String(f.lastModified || 0));
       try {
         const r = await remoteFetch<{ status: string; blob_hash: string | null }>("/api/blobs/upload", {
           method: "POST",
@@ -707,6 +708,12 @@ const remoteApi = {
       body: JSON.stringify({ blob_hashes: blobHashes, expires_days: expiresDays, access_code: accessCode }),
     }),
   cancelShare: (id: string) => remoteFetch<void>(`/api/shares/${id}`, { method: "DELETE" }),
+  shareExtend: (id: string, days: number) =>
+    remoteFetch<{ expires_at: number | null }>(`/api/shares/${id}/extend`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ days }),
+    }),
   shareMeta: async (id: string): Promise<ShareMeta> => {
     // 公开端点（分享查看方无需登录）；后端对不存在/过期返回 JSON 错误体
     const res = await fetch(`${remoteUrl()}/s/${id}/meta`);
@@ -804,6 +811,9 @@ const localAdminStubs = {
     throw new Error("分享链接需连接后台使用");
   },
   cancelShare: async () => {
+    throw new Error("分享链接需连接后台使用");
+  },
+  shareExtend: async () => {
     throw new Error("分享链接需连接后台使用");
   },
   shareMeta: async (): Promise<ShareMeta> => {
@@ -931,6 +941,7 @@ export interface ApiProvider {
   listShares(): Promise<ShareInfo[]>;
   createShare(blobHashes: string[], expiresDays: number | null, accessCode: string | null): Promise<{ url: string }>;
   cancelShare(id: string): Promise<void>;
+  shareExtend(id: string, days: number): Promise<{ expires_at: number | null }>;
   shareMeta(id: string): Promise<ShareMeta>;
   albumShare(albumId: string, expiresDays: number | null, accessCode: string | null): Promise<{ url: string }>;
   albumDelete(albumId: string): Promise<void>;

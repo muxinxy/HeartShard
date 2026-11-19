@@ -336,13 +336,24 @@ function AvatarMenu({
     <>
       <div style={{ position: "fixed", inset: 0, zIndex: 140 }} onClick={onClose} />
       <div className="avatar-menu" style={{ zIndex: 150 }}>
-        <div
-          className="avatar"
-          style={{ width: 72, height: 72, fontSize: 28, margin: "6px auto 0", cursor: platform.isRemote ? "pointer" : "default" }}
-          onClick={platform.isRemote ? onPickAvatar : undefined}
-          title={platform.isRemote ? "点击更换头像" : undefined}
-        >
-          {me?.avatar ? <img src={me.avatar} alt="" /> : avatarChar}
+        <div style={{ position: "relative", display: "inline-block", margin: "6px auto 0" }}>
+          <div
+            className="avatar"
+            style={{ width: 72, height: 72, fontSize: 28, cursor: platform.isRemote ? "pointer" : "default" }}
+            onClick={platform.isRemote ? onPickAvatar : undefined}
+            title={platform.isRemote ? "点击更换头像" : undefined}
+          >
+            {me?.avatar ? <img src={me.avatar} alt="" /> : avatarChar}
+          </div>
+          {platform.isRemote && (
+            <span
+              style={{ position: "absolute", right: -2, bottom: -2, width: 26, height: 26, borderRadius: "50%", background: "var(--primary)", color: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+              onClick={onPickAvatar}
+              title="点击更换头像"
+            >
+              <Ic name="i-edit" />
+            </span>
+          )}
         </div>
         <div style={{ fontWeight: 600, fontSize: 17, margin: "8px 0 12px" }}>{me?.name || "本地相册库"}</div>
         <button className="menu-item" onClick={() => setPwOpen(true)}>

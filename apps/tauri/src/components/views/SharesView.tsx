@@ -51,6 +51,23 @@ export function SharesView() {
     }, true);
   };
 
+  // 延期：从当前时刻（或现有过期时间，取较晚者）延长 N 天
+  const extend = (s: ShareInfo) => {
+    actions.confirmAsk(
+      "延期分享",
+      `将「${s.album_name ?? s.name ?? s.id}」从当前时刻（或现有过期时间，取较晚者）延长 7 天？`,
+      async () => {
+        try {
+          await api.shareExtend(s.id, 7);
+          toast.success("已延期 7 天");
+          reload();
+        } catch (e) {
+          toast.error(String(e));
+        }
+      }
+    );
+  };
+
   const showContent = async (s: ShareInfo) => {
     try {
       const meta = await api.shareMeta(s.id);
@@ -144,6 +161,7 @@ export function SharesView() {
               </td>
               <td>
                 <button onClick={() => copyLink(s)}>复制链接</button>{" "}
+                <button onClick={() => extend(s)}>延期</button>{" "}
                 {!expired(s) && (
                   <button className="danger" onClick={() => cancel(s)}>
                     取消分享
